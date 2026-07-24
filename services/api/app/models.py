@@ -116,6 +116,115 @@ class PaymentTransaction(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class QuoteStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    declined = "declined"
+    withdrawn = "withdrawn"
+
+
+class Quote(Base):
+    __tablename__ = "quotes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    artisan_id: Mapped[str] = mapped_column(ForeignKey("artisans.id"), index=True)
+    amount: Mapped[float] = mapped_column(Float)
+    message: Mapped[str] = mapped_column(Text, default="")
+    eta_hours: Mapped[int] = mapped_column(Integer, default=24)
+    status: Mapped[QuoteStatus] = mapped_column(SqlEnum(QuoteStatus), default=QuoteStatus.pending, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MilestoneStatus(str, Enum):
+    proposed = "proposed"
+    funded = "funded"
+    submitted = "submitted"
+    released = "released"
+    disputed = "disputed"
+
+
+class JobMilestone(Base):
+    __tablename__ = "job_milestones"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    status: Mapped[MilestoneStatus] = mapped_column(SqlEnum(MilestoneStatus), default=MilestoneStatus.proposed, index=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class JobMessage(Base):
+    __tablename__ = "job_messages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    sender_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(30), default="text")
+    attachment_url: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), unique=True, index=True)
+    client_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    artisan_id: Mapped[str] = mapped_column(ForeignKey("artisans.id"), index=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DisputeStatus(str, Enum):
+    open = "open"
+    investigating = "investigating"
+    resolved = "resolved"
+    rejected = "rejected"
+
+
+class Dispute(Base):
+    __tablename__ = "disputes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    opened_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    reason: Mapped[str] = mapped_column(String(180))
+    details: Mapped[str] = mapped_column(Text)
+    evidence: Mapped[list[str]] = mapped_column(JSON, default=list)
+    status: Mapped[DisputeStatus] = mapped_column(SqlEnum(DisputeStatus), default=DisputeStatus.open, index=True)
+    resolution: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    artisan_id: Mapped[str] = mapped_column(ForeignKey("artisans.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ArtisanAvailability(Base):
+    __tablename__ = "artisan_availability"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    artisan_id: Mapped[str] = mapped_column(ForeignKey("artisans.id"), index=True)
+    weekday: Mapped[int] = mapped_column(Integer)
+    start_time: Mapped[str] = mapped_column(String(5), default="08:00")
+    end_time: Mapped[str] = mapped_column(String(5), default="17:00")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    body: Mapped[str] = mapped_column(Text, default="")
+    channel: Mapped[str] = mapped_column(String(20), default="in_app")
+    read: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ApplicationStatus(str, Enum):
     pending = "pending"
     approved = "approved"

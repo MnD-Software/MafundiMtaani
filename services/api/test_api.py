@@ -91,3 +91,31 @@ def test_artisan_application_and_admin_approval():
         reviewed = client.patch(f"/v1/admin/applications/{created.json()['id']}", headers={"Authorization":f"Bearer {admin_token}"}, json={"status":"approved","review_note":"Verified"})
         assert reviewed.status_code == 200
         assert reviewed.json()["status"] == "approved"
+
+
+def test_quote_job_room_tracking_and_verified_review():
+    with TestClient(app) as client:
+        client_token = register(client, "workflow-client@test.local")
+        artisan_token = register(client, "workflow-artisan@test.local", "artisan")
+        application = client.post("/v1/applications", headers={"Authorization":f"Bearer {artisan_token}"}, json={"name":"Workflow Artisan","phone":"+254711222333","trade":"Plumbing","area":"Kilimani","years_experience":5,"documents":["national_id"]})
+        admin_token = create_admin()
+        assert client.patch(f"/v1/admin/applications/{application.json()['id']}", headers={"Authorization":f"Bearer {admin_token}"}, json={"status":"approved","review_note":"Verified"}).status_code == 200
+        job = client.post("/v1/jobs", headers={"Authorization":f"Bearer {client_token}"}, json={"client_name":"Workflow Client","client_phone":"+254700111222","trade":"Plumbing","title":"Repair kitchen sink","description":"The kitchen sink pipe is leaking beneath the cabinet.","area":"Kilimani","urgency":"today","budget_min":2000,"budget_max":6000}).json()
+        quote = client.post("/v1/quotes", headers={"Authorization":f"Bearer {artisan_token}"}, json={"job_id":job["id"],"amount":4500,"message":"Parts and labour included.","eta_hours":2})
+        assert quote.status_code == 201
+        assert client.post(f"/v1/quotes/{quote.json()['id']}/accept", headers={"Authorization":f"Bearer {client_token}"}).status_code == 200
+        assert client.post(f"/v1/jobs/{job['id']}/messages", headers={"Authorization":f"Bearer {client_token}"}, json={"body":"Please call on arrival."}).status_code == 201
+        assert client.patch(f"/v1/jobs/{job['id']}/status?next_status=in_progress", headers={"Authorization":f"Bearer {artisan_token}"}).status_code == 200
+        assert client.patch(f"/v1/jobs/{job['id']}/status?next_status=completed", headers={"Authorization":f"Bearer {artisan_token}"}).status_code == 200
+        review = client.post(f"/v1/jobs/{job['id']}/reviews", headers={"Authorization":f"Bearer {client_token}"}, json={"rating":5,"comment":"Excellent verified work."})
+        assert review.status_code == 201
+        assert review.json()["verified"] is True
+        dispute = client.post(f"/v1/jobs/{job['id']}/disputes", headers={"Authorization":f"Bearer {client_token}"}, json={"reason":"Receipt question","details":"I need operations to verify the final receipt.","evidence":[]})
+        assert dispute.status_code == 201
+        disputes = client.get("/v1/admin/disputes", headers={"Authorization":f"Bearer {admin_token}"})
+        assert disputes.status_code == 200
+        assert any(item["id"] == dispute.json()["id"] for item in disputes.json())
+        assert client.patch(f"/v1/admin/disputes/{dispute.json()['id']}", headers={"Authorization":f"Bearer {admin_token}"}, json={"status":"resolved","resolution":"Receipt verified"}).status_code == 200
+        integrations = client.get("/v1/integrations/status", headers={"Authorization":f"Bearer {admin_token}"})
+        assert integrations.status_code == 200
+        assert integrations.json()["in_app_notifications"]["configured"] is True

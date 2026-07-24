@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     jwt_secret: str = "development-only-change-me"
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 60
+    mpesa_consumer_key: str = ""
+    mpesa_consumer_secret: str = ""
+    mpesa_shortcode: str = ""
+    mpesa_passkey: str = ""
+    mpesa_callback_url: str = ""
+    mpesa_base_url: str = "https://sandbox.safaricom.co.ke"
+    google_maps_key: str = ""
+    whatsapp_token: str = ""
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MAFUNDI_")
 
     def model_post_init(self, __context: object) -> None:

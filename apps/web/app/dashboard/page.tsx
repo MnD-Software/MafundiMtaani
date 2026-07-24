@@ -1,2 +1,2 @@
 import { DashboardClient } from "@/components/dashboard-client";
-export default function DashboardPage() { return <DashboardClient />; }
+export default async function DashboardPage({ searchParams }:{searchParams:Promise<{section?:string}>}) { return <DashboardClient initialSection={(await searchParams).section}/>; }

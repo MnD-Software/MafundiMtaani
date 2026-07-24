@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
+import base64
 from datetime import datetime, timezone
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -9,7 +12,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, Job, JobEvent, JobStatus, PaymentStatus, PaymentTransaction, User, UserRole
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, Dispute, DisputeStatus, Favorite, Job, JobEvent, JobMessage, JobMilestone, JobStatus, MilestoneStatus, Notification, PaymentStatus, PaymentTransaction, Quote, QuoteStatus, Review, User, UserRole
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -198,6 +201,341 @@ def review_application(application_id: str, review: ApplicationReview, db: Sessi
     return application
 
 
+class QuoteCreate(BaseModel):
+    job_id: str
+    amount: float = Field(gt=0)
+    message: str = Field(min_length=3, max_length=2000)
+    eta_hours: int = Field(default=24, ge=1, le=720)
+
+
+class MessageCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+    kind: str = Field(default="text", pattern="^(text|photo|voice|document)$")
+    attachment_url: str = Field(default="", max_length=500)
+
+
+class MilestoneCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=180)
+    amount: float = Field(ge=0)
+
+
+class ReviewCreate(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: str = Field(default="", max_length=2000)
+
+
+class DisputeCreate(BaseModel):
+    reason: str = Field(min_length=3, max_length=180)
+    details: str = Field(min_length=10, max_length=4000)
+    evidence: list[str] = Field(default_factory=list, max_length=10)
+
+
+class DisputeReview(BaseModel):
+    status: DisputeStatus
+    resolution: str = Field(default="", max_length=4000)
+
+
+class AvailabilityCreate(BaseModel):
+    weekday: int = Field(ge=0, le=6)
+    start_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    end_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    active: bool = True
+
+
+class CheckoutCreate(BaseModel):
+    job_id: str
+    phone: str = Field(min_length=10, max_length=15)
+    amount: float = Field(gt=0)
+
+
+def user_artisan(db: Session, user: User) -> Artisan | None:
+    return db.scalar(select(Artisan).where(Artisan.user_id == user.id))
+
+
+def require_job_access(job: Job, db: Session, user: User) -> None:
+    if user.role in {UserRole.admin, UserRole.support}:
+        return
+    if job.client_user_id == user.id:
+        return
+    artisan = user_artisan(db, user)
+    if artisan and (job.assigned_artisan_id == artisan.id or job.status in {JobStatus.open, JobStatus.matched}):
+        return
+    raise HTTPException(403, "You do not have access to this job")
+
+
+def quote_dict(quote: Quote, db: Session) -> dict:
+    artisan = db.get(Artisan, quote.artisan_id)
+    return {"id":quote.id, "job_id":quote.job_id, "artisan_id":quote.artisan_id, "artisan_name":artisan.name if artisan else "Artisan", "artisan_rating":artisan.rating if artisan else 0, "amount":quote.amount, "message":quote.message, "eta_hours":quote.eta_hours, "status":quote.status.value, "created_at":quote.created_at}
+
+
+@app.get("/v1/quotes")
+def list_quotes(job_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    query = select(Quote)
+    if job_id:
+        job = db.get(Job, job_id)
+        if not job:
+            raise HTTPException(404, "Job not found")
+        require_job_access(job, db, user)
+        query = query.where(Quote.job_id == job_id)
+    elif user.role == UserRole.artisan:
+        artisan = user_artisan(db, user)
+        query = query.where(Quote.artisan_id == (artisan.id if artisan else ""))
+    elif user.role in {UserRole.client, UserRole.estate_manager}:
+        query = query.join(Job, Quote.job_id == Job.id).where(Job.client_user_id == user.id)
+    elif user.role not in {UserRole.admin, UserRole.support}:
+        raise HTTPException(403, "Not authorized")
+    return [quote_dict(item, db) for item in db.scalars(query.order_by(Quote.created_at.desc())).all()]
+
+
+@app.post("/v1/quotes", status_code=201)
+def create_quote(data: QuoteCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))) -> dict:
+    artisan = user_artisan(db, user)
+    job = db.get(Job, data.job_id)
+    if not artisan or not artisan.verified:
+        raise HTTPException(403, "Only approved artisans can quote")
+    if not job or job.status not in {JobStatus.open, JobStatus.matched}:
+        raise HTTPException(409, "This job is not accepting quotes")
+    existing = db.scalar(select(Quote).where(Quote.job_id == job.id, Quote.artisan_id == artisan.id, Quote.status == QuoteStatus.pending))
+    if existing:
+        raise HTTPException(409, "You already submitted a quote")
+    quote = Quote(artisan_id=artisan.id, **data.model_dump())
+    db.add(quote)
+    db.add(Notification(user_id=job.client_user_id, title="New quote received", body=f"{artisan.name} sent a quote for {job.reference}."))
+    db.commit(); db.refresh(quote)
+    return quote_dict(quote, db)
+
+
+@app.post("/v1/quotes/{quote_id}/accept")
+def accept_quote(quote_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.client, UserRole.estate_manager))) -> dict:
+    quote = db.get(Quote, quote_id)
+    job = db.get(Job, quote.job_id) if quote else None
+    if not quote or not job:
+        raise HTTPException(404, "Quote not found")
+    if job.client_user_id != user.id:
+        raise HTTPException(403, "Not your job")
+    quote.status = QuoteStatus.accepted
+    job.assigned_artisan_id = quote.artisan_id
+    job.status = JobStatus.assigned
+    for other in db.scalars(select(Quote).where(Quote.job_id == job.id, Quote.id != quote.id)).all():
+        other.status = QuoteStatus.declined
+    artisan = db.get(Artisan, quote.artisan_id)
+    if artisan:
+        db.add(Notification(user_id=artisan.user_id, title="Quote accepted", body=f"You were selected for {job.reference}."))
+    db.add(JobEvent(job_id=job.id, event_type="quote.accepted", actor_id=user.id, payload={"quote_id":quote.id}))
+    db.commit()
+    return {"status":"accepted", "job_id":job.id}
+
+
+@app.get("/v1/jobs/{job_id}/room")
+def job_room(job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    require_job_access(job, db, user)
+    messages = db.scalars(select(JobMessage).where(JobMessage.job_id == job.id).order_by(JobMessage.created_at)).all()
+    milestones = db.scalars(select(JobMilestone).where(JobMilestone.job_id == job.id).order_by(JobMilestone.created_at)).all()
+    quotes = db.scalars(select(Quote).where(Quote.job_id == job.id).order_by(Quote.created_at.desc())).all()
+    dispute = db.scalar(select(Dispute).where(Dispute.job_id == job.id).order_by(Dispute.created_at.desc()))
+    return {
+        "job":{"id":job.id,"reference":job.reference,"title":job.title,"trade":job.trade,"area":job.area,"status":job.status.value,"client_name":job.client_name,"assigned_artisan_id":job.assigned_artisan_id},
+        "quotes":[quote_dict(item, db) for item in quotes],
+        "messages":[{"id":item.id,"sender_id":item.sender_id,"body":item.body,"kind":item.kind,"attachment_url":item.attachment_url,"created_at":item.created_at} for item in messages],
+        "milestones":[{"id":item.id,"title":item.title,"amount":item.amount,"status":item.status.value,"due_at":item.due_at} for item in milestones],
+        "dispute":{"id":dispute.id,"reason":dispute.reason,"status":dispute.status.value,"resolution":dispute.resolution} if dispute else None,
+        "viewer":{"id":user.id,"role":user.role.value},
+    }
+
+
+@app.post("/v1/jobs/{job_id}/messages", status_code=201)
+def send_message(job_id: str, data: MessageCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    require_job_access(job, db, user)
+    message = JobMessage(job_id=job.id, sender_id=user.id, **data.model_dump())
+    db.add(message); db.commit(); db.refresh(message)
+    return {"id":message.id,"sender_id":message.sender_id,"body":message.body,"kind":message.kind,"attachment_url":message.attachment_url,"created_at":message.created_at}
+
+
+@app.post("/v1/jobs/{job_id}/milestones", status_code=201)
+def create_milestone(job_id: str, data: MilestoneCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    require_job_access(job, db, user)
+    if user.role not in {UserRole.admin, UserRole.support}:
+        artisan = user_artisan(db, user)
+        if not artisan or job.assigned_artisan_id != artisan.id:
+            raise HTTPException(403, "Only the assigned artisan can propose milestones")
+    milestone = JobMilestone(job_id=job.id, **data.model_dump())
+    db.add(milestone); db.commit(); db.refresh(milestone)
+    return {"id":milestone.id,"title":milestone.title,"amount":milestone.amount,"status":milestone.status.value}
+
+
+@app.patch("/v1/jobs/{job_id}/status")
+def update_job_status(job_id: str, next_status: JobStatus, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    require_job_access(job, db, user)
+    artisan = user_artisan(db, user)
+    if user.role not in {UserRole.admin, UserRole.support} and (not artisan or job.assigned_artisan_id != artisan.id):
+        raise HTTPException(403, "Only the assigned artisan can update progress")
+    allowed = {JobStatus.assigned:{JobStatus.in_progress}, JobStatus.in_progress:{JobStatus.completed}}
+    if next_status not in allowed.get(job.status, set()):
+        raise HTTPException(409, "Invalid job status transition")
+    job.status = next_status
+    db.add(JobEvent(job_id=job.id, event_type=f"job.{next_status.value}", actor_id=user.id, payload={}))
+    db.add(Notification(user_id=job.client_user_id, title="Job status updated", body=f"{job.reference} is now {next_status.value.replace('_',' ')}."))
+    db.commit()
+    return {"id":job.id,"status":job.status.value}
+
+
+@app.post("/v1/jobs/{job_id}/reviews", status_code=201)
+def create_review(job_id: str, data: ReviewCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.client, UserRole.estate_manager))) -> dict:
+    job = db.get(Job, job_id)
+    if not job or job.client_user_id != user.id:
+        raise HTTPException(404, "Completed job not found")
+    if job.status != JobStatus.completed or not job.assigned_artisan_id:
+        raise HTTPException(409, "Reviews require a completed job")
+    if db.scalar(select(Review).where(Review.job_id == job.id)):
+        raise HTTPException(409, "This job already has a review")
+    review = Review(job_id=job.id, client_user_id=user.id, artisan_id=job.assigned_artisan_id, **data.model_dump())
+    db.add(review); db.flush()
+    artisan = db.get(Artisan, job.assigned_artisan_id)
+    if artisan:
+        ratings = db.scalars(select(Review.rating).where(Review.artisan_id == artisan.id)).all()
+        artisan.rating = sum(ratings) / len(ratings)
+        artisan.completed_jobs = max(artisan.completed_jobs, len(ratings))
+    db.commit(); db.refresh(review)
+    return {"id":review.id,"rating":review.rating,"comment":review.comment,"verified":True}
+
+
+@app.post("/v1/jobs/{job_id}/disputes", status_code=201)
+def create_dispute(job_id: str, data: DisputeCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    require_job_access(job, db, user)
+    if db.scalar(select(Dispute).where(Dispute.job_id == job.id, Dispute.status.in_([DisputeStatus.open, DisputeStatus.investigating]))):
+        raise HTTPException(409, "An active dispute already exists")
+    dispute = Dispute(job_id=job.id, opened_by=user.id, **data.model_dump())
+    db.add(dispute); db.commit(); db.refresh(dispute)
+    return {"id":dispute.id,"status":dispute.status.value}
+
+
+@app.get("/v1/admin/disputes")
+def list_disputes(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin, UserRole.support))) -> list[dict]:
+    rows = db.execute(select(Dispute, Job).join(Job, Dispute.job_id == Job.id).order_by(Dispute.created_at.desc())).all()
+    return [{"id":item.id,"job_id":job.id,"reference":job.reference,"title":job.title,"area":job.area,"reason":item.reason,"details":item.details,"evidence":item.evidence,"status":item.status.value,"resolution":item.resolution,"created_at":item.created_at} for item, job in rows]
+
+
+@app.patch("/v1/admin/disputes/{dispute_id}")
+def review_dispute(dispute_id: str, data: DisputeReview, db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin, UserRole.support))) -> dict:
+    dispute = db.get(Dispute, dispute_id)
+    if not dispute:
+        raise HTTPException(404, "Dispute not found")
+    dispute.status = data.status
+    dispute.resolution = data.resolution
+    db.commit()
+    return {"id":dispute.id,"status":dispute.status.value,"resolution":dispute.resolution}
+
+
+@app.get("/v1/favorites")
+def list_favorites(db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.client, UserRole.estate_manager))) -> list[dict]:
+    rows = db.execute(select(Favorite, Artisan).join(Artisan, Favorite.artisan_id == Artisan.id).where(Favorite.user_id == user.id).order_by(Favorite.created_at.desc())).all()
+    return [{"id":favorite.id,"artisan":{"id":artisan.id,"name":artisan.name,"trade":artisan.trade,"area":artisan.area,"rating":artisan.rating}} for favorite, artisan in rows]
+
+
+@app.post("/v1/favorites/{artisan_id}", status_code=201)
+def add_favorite(artisan_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.client, UserRole.estate_manager))) -> dict:
+    if not db.get(Artisan, artisan_id):
+        raise HTTPException(404, "Artisan not found")
+    favorite = db.scalar(select(Favorite).where(Favorite.user_id == user.id, Favorite.artisan_id == artisan_id))
+    if not favorite:
+        favorite = Favorite(user_id=user.id, artisan_id=artisan_id); db.add(favorite); db.commit(); db.refresh(favorite)
+    return {"id":favorite.id,"artisan_id":favorite.artisan_id}
+
+
+@app.get("/v1/availability")
+def get_availability(db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))) -> list[dict]:
+    artisan = user_artisan(db, user)
+    rows = db.scalars(select(ArtisanAvailability).where(ArtisanAvailability.artisan_id == (artisan.id if artisan else "")).order_by(ArtisanAvailability.weekday)).all()
+    return [{"id":row.id,"weekday":row.weekday,"start_time":row.start_time,"end_time":row.end_time,"active":row.active} for row in rows]
+
+
+@app.put("/v1/availability")
+def set_availability(items: list[AvailabilityCreate], db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))) -> list[dict]:
+    artisan = user_artisan(db, user)
+    if not artisan:
+        raise HTTPException(403, "Approved artisan profile required")
+    for row in db.scalars(select(ArtisanAvailability).where(ArtisanAvailability.artisan_id == artisan.id)).all():
+        db.delete(row)
+    for item in items:
+        db.add(ArtisanAvailability(artisan_id=artisan.id, **item.model_dump()))
+    db.commit()
+    return get_availability(db, user)
+
+
+@app.get("/v1/notifications")
+def list_notifications(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    rows = db.scalars(select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc()).limit(50)).all()
+    return [{"id":row.id,"title":row.title,"body":row.body,"channel":row.channel,"read":row.read,"created_at":row.created_at} for row in rows]
+
+
+@app.get("/v1/integrations/status")
+def integration_status(_: User = Depends(require_roles(UserRole.admin, UserRole.support))) -> dict:
+    return {
+        "mpesa":{"configured":all([settings.mpesa_consumer_key, settings.mpesa_consumer_secret, settings.mpesa_shortcode, settings.mpesa_passkey, settings.mpesa_callback_url])},
+        "google_maps":{"configured":bool(settings.google_maps_key)},
+        "whatsapp":{"configured":bool(settings.whatsapp_token)},
+        "in_app_notifications":{"configured":True},
+    }
+
+
+@app.post("/v1/payments/mpesa/checkout", status_code=202)
+async def mpesa_checkout(data: CheckoutCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.client, UserRole.estate_manager))) -> dict:
+    job = db.get(Job, data.job_id)
+    if not job or job.client_user_id != user.id:
+        raise HTTPException(404, "Job not found")
+    if not all([settings.mpesa_consumer_key, settings.mpesa_consumer_secret, settings.mpesa_shortcode, settings.mpesa_passkey, settings.mpesa_callback_url]):
+        raise HTTPException(503, "M-Pesa is not configured")
+    phone = data.phone.replace("+", "")
+    if phone.startswith("0"):
+        phone = f"254{phone[1:]}"
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    password = base64.b64encode(f"{settings.mpesa_shortcode}{settings.mpesa_passkey}{timestamp}".encode()).decode()
+    async with httpx.AsyncClient(timeout=20) as client:
+        auth = await client.get(f"{settings.mpesa_base_url}/oauth/v1/generate?grant_type=client_credentials", auth=(settings.mpesa_consumer_key, settings.mpesa_consumer_secret))
+        if auth.status_code != 200:
+            raise HTTPException(502, "M-Pesa authentication failed")
+        response = await client.post(f"{settings.mpesa_base_url}/mpesa/stkpush/v1/processrequest", headers={"Authorization":f"Bearer {auth.json()['access_token']}"}, json={
+            "BusinessShortCode":settings.mpesa_shortcode,"Password":password,"Timestamp":timestamp,"TransactionType":"CustomerPayBillOnline",
+            "Amount":round(data.amount),"PartyA":phone,"PartyB":settings.mpesa_shortcode,"PhoneNumber":phone,"CallBackURL":settings.mpesa_callback_url,
+            "AccountReference":job.reference,"TransactionDesc":f"Mafundi job {job.reference}",
+        })
+    if response.status_code != 200:
+        raise HTTPException(502, "M-Pesa checkout request failed")
+    payload = response.json()
+    fee = round(data.amount * .10, 2)
+    transaction = PaymentTransaction(job_id=job.id, client_user_id=user.id, artisan_id=job.assigned_artisan_id, provider="mpesa", provider_reference=payload["CheckoutRequestID"], amount=data.amount, platform_fee=fee, artisan_net=data.amount-fee, status=PaymentStatus.pending)
+    db.add(transaction); db.commit()
+    return {"checkout_request_id":payload["CheckoutRequestID"],"status":"pending","message":"Confirm the M-Pesa prompt on your phone."}
+
+
+@app.post("/v1/payments/mpesa/callback")
+def mpesa_callback(payload: dict, db: Session = Depends(get_db)) -> dict:
+    callback = payload.get("Body",{}).get("stkCallback",{})
+    reference = callback.get("CheckoutRequestID","")
+    transaction = db.scalar(select(PaymentTransaction).where(PaymentTransaction.provider_reference == reference))
+    if transaction:
+        transaction.status = PaymentStatus.held if callback.get("ResultCode") == 0 else PaymentStatus.failed
+        if transaction.status == PaymentStatus.held:
+            transaction.completed_at = datetime.now(timezone.utc)
+        db.commit()
+    return {"ResultCode":0,"ResultDesc":"Accepted"}
+
+
 @app.get("/v1/admin/metrics")
 def admin_metrics(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin, UserRole.support))) -> dict:
     status_rows = db.execute(select(Job.status, func.count(Job.id)).group_by(Job.status)).all()
@@ -216,6 +554,7 @@ def admin_metrics(db: Session = Depends(get_db), _: User = Depends(require_roles
         "platform_commission": db.scalar(select(func.coalesce(func.sum(PaymentTransaction.platform_fee), 0)).where(completed_payments)) or 0,
         "artisan_payouts": db.scalar(select(func.coalesce(func.sum(PaymentTransaction.artisan_net), 0)).where(completed_payments)) or 0,
         "funds_held": db.scalar(select(func.coalesce(func.sum(PaymentTransaction.amount), 0)).where(PaymentTransaction.status == PaymentStatus.held)) or 0,
+        "open_disputes": db.scalar(select(func.count(Dispute.id)).where(Dispute.status.in_([DisputeStatus.open, DisputeStatus.investigating]))) or 0,
         "jobs_by_status": {str(status.value): count for status, count in status_rows},
         "users_by_role": {str(role.value): count for role, count in role_rows},
         "jobs_by_trade": [{"label": trade, "value": count} for trade, count in trade_rows],

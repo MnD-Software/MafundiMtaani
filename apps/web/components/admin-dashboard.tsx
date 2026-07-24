@@ -16,8 +16,8 @@ type Metrics = {
 const emptyMetrics: Metrics = { active_artisans:0, open_jobs:0, pending_applications:0, supported_estates:0, total_users:0, total_jobs:0, payments_received:0, platform_commission:0, artisan_payouts:0, funds_held:0, jobs_by_status:{}, users_by_role:{}, jobs_by_trade:[], jobs_by_area:[] };
 const money = (value:number) => `KSh ${Number(value || 0).toLocaleString()}`;
 
-export function AdminDashboard() {
-  const [section, setSection] = useState("overview");
+export function AdminDashboard({initialSection="overview"}:{initialSection?:string}) {
+  const [section, setSection] = useState(initialSection);
   const [query, setQuery] = useState("");
   const [applications, setApplications] = useState<Application[]>([]);
   const [metrics, setMetrics] = useState<Metrics>(emptyMetrics);
