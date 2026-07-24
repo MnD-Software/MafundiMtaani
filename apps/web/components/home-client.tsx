@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, LocateFixed, MapPin, Search, ShieldCheck, Smartphone, Star, WalletCards } from "lucide-react";
+import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, LocateFixed, Mail, MapPin, Phone, Search, ShieldCheck, Smartphone, Star, WalletCards } from "lucide-react";
 import { categories, nairobiEstates, type Artisan } from "@/lib/data";
 import { iconMap } from "./icons";
 import { NairobiMap } from "./nairobi-map";
@@ -14,6 +14,16 @@ export function HomeClient() {
   const [searched, setSearched] = useState(false);
   const [artisans, setArtisans] = useState<Artisan[]>([]);
   const [searching, setSearching] = useState(true);
+  const [searchDocked, setSearchDocked] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const element = searchRef.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(([entry]) => setSearchDocked(!entry.isIntersecting), { rootMargin: "-78px 0px 0px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
@@ -35,19 +45,53 @@ export function HomeClient() {
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [query, area, active]);
   const visible = useMemo(() => artisans, [artisans]);
+  const serviceSuggestions = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return categories.filter((category) => !term || category.name.toLowerCase().includes(term)).slice(0, 4);
+  }, [query]);
+  const estateSuggestions = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return nairobiEstates.filter((estate) => !term || estate.toLowerCase().includes(term)).slice(0, 5);
+  }, [query]);
+  const submitSearch = (event: FormEvent) => {
+    event.preventDefault();
+    setSearched(true);
+    setSearchOpen(true);
+  };
+  const predictiveResults = (compact = false) => (
+    <div className={`predictive-results ${compact ? "compact" : ""}`}>
+      <div className="predictive-heading"><strong>Search Mafundi</strong><span>{searching ? "Checking live availability…" : `${artisans.length} live matches`}</span></div>
+      {!!serviceSuggestions.length && <div className="predictive-group"><small>Services</small>{serviceSuggestions.map((category) => {
+        const Icon = iconMap[category.icon as keyof typeof iconMap];
+        return <button type="button" key={category.name} onClick={() => { setActive(category.name); setQuery(category.name); setSearchOpen(true); }}><span className="predictive-icon"><Icon size={17} /></span><span><strong>{category.name}</strong><em>Verified professionals near {area}</em></span><ChevronRight size={16} /></button>;
+      })}</div>}
+      {!!estateSuggestions.length && <div className="predictive-group predictive-estates"><small>Neighbourhoods</small><div>{estateSuggestions.map((estate) => <button type="button" key={estate} onClick={() => { setArea(estate); setQuery(""); setSearchOpen(true); }}><MapPin size={14} />{estate}</button>)}</div></div>}
+      {!!artisans.length && <div className="predictive-group predictive-artisans"><small>Available professionals</small>{artisans.slice(0, 3).map((artisan) => <Link href={`/artisan/${artisan.id}`} key={artisan.id}><span className="predictive-avatar" style={{ background: artisan.color }}>{artisan.initials}</span><span><strong>{artisan.name}</strong><em>{artisan.trade} · {artisan.area}</em></span><span className="predictive-rating"><Star size={12} fill="currentColor" />{artisan.rating}</span></Link>)}</div>}
+      {!searching && !serviceSuggestions.length && !estateSuggestions.length && !artisans.length && <div className="predictive-empty"><strong>No exact match yet</strong><span>Post the job and we&apos;ll alert verified artisans nearby.</span><Link href={`/post-job?area=${encodeURIComponent(area)}`}>Post this job</Link></div>}
+      <Link className="predictive-cta" href={`/post-job?area=${encodeURIComponent(area)}`}>Describe a custom job <ArrowRight size={15} /></Link>
+    </div>
+  );
 
   return (
     <>
       <main>
+        <div className={`search-dock ${searchDocked ? "visible" : ""}`}>
+          <form onSubmit={submitSearch}>
+            <label><Search size={17} /><input value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder="What needs fixing?" aria-label="Search service" /></label>
+            <label><MapPin size={17} /><select value={area} onChange={(event) => setArea(event.target.value)} aria-label="Select estate">{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></label>
+            <button type="submit"><Search size={18} /><span>Find help</span></button>
+            {searchOpen && predictiveResults(true)}
+          </form>
+        </div>
         <section className="hero">
           <div className="hero-copy">
             <div className="eyebrow"><span className="live-dot" /> Nairobi-first verified artisan network</div>
             <h1>Trusted help,<br /><span>right around the corner.</span></h1>
             <p>Book skilled, background-checked artisans in minutes. Clear pricing, real-time updates, and work guaranteed.</p>
-            <form className="search-box" onSubmit={(event) => { event.preventDefault(); setSearched(true); document.querySelector("#artisans")?.scrollIntoView({ behavior: "smooth" }); }}>
+            <form ref={searchRef} className="search-box" onSubmit={submitSearch}>
               <label>
                 <span>What do you need?</span>
-                <div><Search size={19} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. leaking tap, broken socket" /></div>
+                <div><Search size={19} /><input value={query} onFocus={() => setSearchOpen(true)} onChange={(e) => { setQuery(e.target.value); setSearchOpen(true); }} placeholder="Try “plumber” or “Kilimani”" /></div>
               </label>
               <div className="search-divider" />
               <label className="location-field">
@@ -55,8 +99,9 @@ export function HomeClient() {
                 <div><MapPin size={19} /><select value={area} onChange={(e) => setArea(e.target.value)} aria-label="Select Nairobi estate">{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></div>
               </label>
               <button className="search-submit" aria-label="Search"><Search size={22} /></button>
+              {searchOpen && predictiveResults()}
             </form>
-            {searched && <p className="search-note">Showing verified artisans available near {area}.</p>}
+            {searched && <p className="search-note">Live predictive results for {area} are shown above.</p>}
             <div className="trust-row">
               <span><ShieldCheck size={18} /> Background checked</span>
               <span><BadgeCheck size={18} /> Work guaranteed</span>
@@ -84,7 +129,7 @@ export function HomeClient() {
               const Icon = iconMap[category.icon as keyof typeof iconMap];
               return <button key={category.name} className={`category-card ${active === category.name ? "active" : ""}`} onClick={() => setActive(active === category.name ? "All" : category.name)}>
                 <span className="category-icon" style={{ background: category.tone }}><Icon size={24} /></span>
-                <strong>{category.name}</strong><span>View verified professionals</span><em className="category-details">Details</em><ChevronRight className="category-arrow" size={18} />
+                <strong>{category.name}</strong><span>Verified professionals</span><ChevronRight className="category-arrow" size={18} />
               </button>;
             })}
           </div>
@@ -129,7 +174,19 @@ export function HomeClient() {
           </ol>
         </section>
       </main>
-      <footer><div className="brand footer-brand">Mafundi<span className="brand-dot">.</span></div><p>Trusted work. Stronger neighbourhoods.</p><span>© 2026 Mafundi Mtaani · Nairobi, Kenya</span></footer>
+      <footer className="site-footer">
+        <div className="footer-main">
+          <div className="footer-intro">
+            <div className="brand footer-brand">Mafundi<span className="brand-dot">.</span></div>
+            <p>Trusted work. Stronger neighbourhoods. Book verified artisans across Nairobi with confidence.</p>
+            <Link className="button button-dark" href="/post-job">Post a job <ArrowRight size={16} /></Link>
+          </div>
+          <div className="footer-column"><strong>Marketplace</strong><Link href="/#services">Find a fundi</Link><Link href="/map">Explore the map</Link><Link href="/post-job">Post a job</Link></div>
+          <div className="footer-column"><strong>For artisans</strong><Link href="/register">Join Mafundi</Link><Link href="/login">Artisan sign in</Link><Link href="/dashboard">Your dashboard</Link></div>
+          <div className="footer-column footer-contact"><strong>Talk to us</strong><a href="mailto:info@mafundimtaani.co.ke"><Mail size={15} />info@mafundimtaani.co.ke</a><a href="tel:+254720898678"><Phone size={15} />+254 720 898678</a><span>Nairobi, Kenya</span></div>
+        </div>
+        <div className="footer-bottom"><span>© 2026 Mafundi Mtaani</span><span>Built for Nairobi&apos;s neighbourhoods.</span></div>
+      </footer>
     </>
   );
 }

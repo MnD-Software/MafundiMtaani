@@ -40,8 +40,10 @@ def test_health_and_empty_database():
 def test_nairobi_estates_are_exposed():
     with TestClient(app) as client:
         payload = client.get("/v1/estates").json()
-        assert payload["total"] >= 70
+        assert payload["total"] >= 120
         assert "Umoja" in payload["areas"]
+        assert "Mukuru Kwa Njenga" in payload["areas"]
+        assert "Buruburu Phase 5" in payload["areas"]
 
 
 def test_job_creation_requires_client_and_is_private():
@@ -63,7 +65,21 @@ def test_admin_endpoints_enforce_rbac():
         assert client.get("/v1/admin/metrics").status_code == 401
         assert client.get("/v1/admin/metrics", headers={"Authorization":f"Bearer {client_token}"}).status_code == 403
         admin_token = create_admin()
-        assert client.get("/v1/admin/metrics", headers={"Authorization":f"Bearer {admin_token}"}).status_code == 200
+        response = client.get("/v1/admin/metrics", headers={"Authorization":f"Bearer {admin_token}"})
+        assert response.status_code == 200
+        assert response.json()["payments_received"] == 0
+        assert response.json()["finance_source"] == "payment_transactions"
+
+
+def test_dashboard_metrics_are_role_scoped():
+    with TestClient(app) as client:
+        client_token = register(client, "dashboard-client@test.local")
+        response = client.get("/v1/dashboard/metrics", headers={"Authorization":f"Bearer {client_token}"})
+        assert response.status_code == 200
+        assert response.json()["role"] == "client"
+        assert response.json()["money_spent"] == 0
+        admin_token = create_admin()
+        assert client.get("/v1/dashboard/metrics", headers={"Authorization":f"Bearer {admin_token}"}).status_code == 403
 
 
 def test_artisan_application_and_admin_approval():

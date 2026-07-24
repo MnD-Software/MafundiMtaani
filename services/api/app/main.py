@@ -9,20 +9,31 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, Job, JobEvent, User, UserRole
+from .models import ApplicationStatus, Artisan, ArtisanApplication, Job, JobEvent, JobStatus, PaymentStatus, PaymentTransaction, User, UserRole
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
-    "Athi River", "Baba Dogo", "Bahati", "Buruburu", "CBD", "Clay City", "Dagoretti", "Dandora",
-    "Donholm", "Eastleigh", "Embakasi", "Fedha", "Garden Estate", "Gigiri", "Githurai", "Highridge",
-    "Huruma", "Imara Daima", "Industrial Area", "Jamhuri", "Jericho", "Kabete", "Kahawa",
-    "Kahawa Sukari", "Kangemi", "Karen", "Kariobangi", "Kasarani", "Kawangware", "Kayole",
-    "Kiambu Road", "Kibera", "Kileleshwa", "Kilimani", "Kitengela", "Komarock", "Lang'ata",
-    "Lavington", "Lucky Summer", "Makadara", "Maringo", "Mathare", "Mbagathi", "Mlolongo",
-    "Mowlem", "Muthaiga", "Mwiki", "Nairobi West", "Ngara", "Ngong", "Ngong Road", "Njiru",
-    "Parklands", "Pangani", "Pipeline", "Ridgeways", "Riruta", "Rongai", "Roysambu", "Ruaka",
-    "Ruaraka", "Ruai", "South B", "South C", "Spring Valley", "Syokimau", "Thome", "Umoja",
-    "Upper Hill", "Utawala", "Westlands", "Zimmerman"
+    "Airbase", "Akiba", "Athi River", "Ayany", "Baba Dogo", "Bahati", "Balozi", "Baraka",
+    "Bellevue", "Buruburu Phase 1", "Buruburu Phase 2", "Buruburu Phase 3", "Buruburu Phase 4",
+    "Buruburu Phase 5", "California", "CBD", "City Cabanas", "City Park", "Clay City",
+    "Dagoretti Corner", "Dandora Phase 1", "Dandora Phase 2", "Dandora Phase 3", "Dandora Phase 4",
+    "Dandora Phase 5", "Donholm", "Eastleigh Section 1", "Eastleigh Section 2", "Eastleigh Section 3",
+    "Embakasi", "Embakasi Village", "Fedha", "Garden Estate", "Gigiri", "Githurai 44",
+    "Githurai 45", "Golf Course", "Greenspan", "Highridge", "Huruma", "Imara Daima",
+    "Industrial Area", "Jacaranda", "Jamhuri", "Jericho", "Kabete", "Kabiria", "Kahawa",
+    "Kahawa Sukari", "Kahawa Wendani", "Kahawa West", "Kamulu", "Kangemi", "Karen",
+    "Kariobangi North", "Kariobangi South", "Kasarani", "Kawangware", "Kayole", "Kiamaiko",
+    "Kiamumbi", "Kiambu Road", "Kibera", "Kileleshwa", "Kilimani", "Kinoo", "Kitengela",
+    "Kitisuru", "Komarock", "Korogocho", "Kyuna", "Laini Saba", "Lang'ata", "Lavington",
+    "Loresho", "Lucky Summer", "Makadara", "Makina", "Makongeni", "Maringo", "Mathare",
+    "Mbagathi", "Mihango", "Mirema", "Mlango Kubwa", "Mlolongo", "Mountain View", "Mowlem",
+    "Mugoya", "Mukuru Kwa Njenga", "Mukuru Kwa Reuben", "Muthaiga", "Mwiki", "Nairobi West",
+    "New Kitisuru", "Ngara", "Ngong", "Ngong Road", "Njiru", "Nyayo Estate", "Olympic",
+    "Pangani", "Parklands", "Pipeline", "Pumwani", "Ridgeways", "Riruta", "Riverside",
+    "Rongai", "Rosslyn", "Roysambu", "Ruaka", "Ruaraka", "Ruai", "Saika", "Savannah",
+    "South B", "South C", "Spring Valley", "Sunton", "Syokimau", "Tassia", "Thindigua",
+    "Thome", "Umoja", "Umoja 1", "Umoja 2", "Umoja 3", "Upper Hill", "Utawala", "Valley Arcade",
+    "Waithaka", "Westlands", "Woodley", "Zimmerman", "Ziwani"
 }
 
 
@@ -189,9 +200,57 @@ def review_application(application_id: str, review: ApplicationReview, db: Sessi
 
 @app.get("/v1/admin/metrics")
 def admin_metrics(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin, UserRole.support))) -> dict:
+    status_rows = db.execute(select(Job.status, func.count(Job.id)).group_by(Job.status)).all()
+    role_rows = db.execute(select(User.role, func.count(User.id)).group_by(User.role)).all()
+    trade_rows = db.execute(select(Job.trade, func.count(Job.id)).group_by(Job.trade).order_by(func.count(Job.id).desc()).limit(6)).all()
+    area_rows = db.execute(select(Job.area, func.count(Job.id)).group_by(Job.area).order_by(func.count(Job.id).desc()).limit(6)).all()
+    completed_payments = PaymentTransaction.status == PaymentStatus.completed
     return {
         "active_artisans": db.scalar(select(func.count(Artisan.id)).where(Artisan.verified.is_(True))) or 0,
         "open_jobs": db.scalar(select(func.count(Job.id)).where(Job.status == "open")) or 0,
         "pending_applications": db.scalar(select(func.count(ArtisanApplication.id)).where(ArtisanApplication.status == ApplicationStatus.pending)) or 0,
         "supported_estates": len(NAIROBI_AREAS),
+        "total_users": db.scalar(select(func.count(User.id))) or 0,
+        "total_jobs": db.scalar(select(func.count(Job.id))) or 0,
+        "payments_received": db.scalar(select(func.coalesce(func.sum(PaymentTransaction.amount), 0)).where(completed_payments)) or 0,
+        "platform_commission": db.scalar(select(func.coalesce(func.sum(PaymentTransaction.platform_fee), 0)).where(completed_payments)) or 0,
+        "artisan_payouts": db.scalar(select(func.coalesce(func.sum(PaymentTransaction.artisan_net), 0)).where(completed_payments)) or 0,
+        "funds_held": db.scalar(select(func.coalesce(func.sum(PaymentTransaction.amount), 0)).where(PaymentTransaction.status == PaymentStatus.held)) or 0,
+        "jobs_by_status": {str(status.value): count for status, count in status_rows},
+        "users_by_role": {str(role.value): count for role, count in role_rows},
+        "jobs_by_trade": [{"label": trade, "value": count} for trade, count in trade_rows],
+        "jobs_by_area": [{"label": area, "value": count} for area, count in area_rows],
+        "finance_source": "payment_transactions",
+    }
+
+
+@app.get("/v1/dashboard/metrics")
+def dashboard_metrics(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    job_query = select(Job)
+    payment_query = select(PaymentTransaction)
+    if user.role in {UserRole.client, UserRole.estate_manager}:
+        job_query = job_query.where(Job.client_user_id == user.id)
+        payment_query = payment_query.where(PaymentTransaction.client_user_id == user.id)
+    elif user.role == UserRole.artisan:
+        artisan_id = db.scalar(select(Artisan.id).where(Artisan.user_id == user.id))
+        job_query = job_query.where(Job.assigned_artisan_id == artisan_id)
+        payment_query = payment_query.where(PaymentTransaction.artisan_id == artisan_id)
+    else:
+        raise HTTPException(403, "Use the operations analytics endpoint")
+    jobs = db.scalars(job_query).all()
+    payments = db.scalars(payment_query).all()
+    status_counts = {status.value: 0 for status in JobStatus}
+    for job in jobs:
+        status_counts[job.status.value] += 1
+    completed = [payment for payment in payments if payment.status == PaymentStatus.completed]
+    return {
+        "role": user.role.value,
+        "jobs_total": len(jobs),
+        "jobs_by_status": status_counts,
+        "money_spent": sum(payment.amount for payment in completed) if user.role in {UserRole.client, UserRole.estate_manager} else 0,
+        "gross_earnings": sum(payment.amount for payment in completed) if user.role == UserRole.artisan else 0,
+        "platform_fees": sum(payment.platform_fee for payment in completed),
+        "net_earnings": sum(payment.artisan_net for payment in completed) if user.role == UserRole.artisan else 0,
+        "funds_held": sum(payment.amount for payment in payments if payment.status == PaymentStatus.held),
+        "transactions": len(payments),
     }

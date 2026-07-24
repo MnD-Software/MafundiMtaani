@@ -16,29 +16,39 @@ export type Artisan = {
 };
 
 export const nairobiEstates = [
-  "Athi River", "Baba Dogo", "Bahati", "Buruburu", "CBD", "Clay City", "Dagoretti",
-  "Dandora", "Donholm", "Eastleigh", "Embakasi", "Fedha", "Garden Estate", "Gigiri",
-  "Githurai", "Highridge", "Huruma", "Imara Daima", "Industrial Area", "Jamhuri",
-  "Jericho", "Kabete", "Kahawa", "Kahawa Sukari", "Kangemi", "Karen", "Kariobangi",
-  "Kasarani", "Kawangware", "Kayole", "Kiambu Road", "Kibera", "Kileleshwa",
-  "Kilimani", "Kitengela", "Komarock", "Lang'ata", "Lavington", "Lucky Summer",
-  "Makadara", "Maringo", "Mathare", "Mbagathi", "Mlolongo", "Mowlem", "Muthaiga",
-  "Mwiki", "Nairobi West", "Ngara", "Ngong", "Ngong Road", "Njiru", "Parklands",
-  "Pangani", "Pipeline", "Ridgeways", "Riruta", "Rongai", "Roysambu", "Ruaka",
-  "Ruaraka", "Ruai", "South B", "South C", "Spring Valley", "Syokimau", "Thome",
-  "Umoja", "Upper Hill", "Utawala", "Westlands", "Zimmerman"
+  "Airbase", "Akiba", "Athi River", "Ayany", "Baba Dogo", "Bahati", "Balozi", "Baraka",
+  "Bellevue", "Buruburu Phase 1", "Buruburu Phase 2", "Buruburu Phase 3", "Buruburu Phase 4",
+  "Buruburu Phase 5", "California", "CBD", "City Cabanas", "City Park", "Clay City",
+  "Dagoretti Corner", "Dandora Phase 1", "Dandora Phase 2", "Dandora Phase 3", "Dandora Phase 4",
+  "Dandora Phase 5", "Donholm", "Eastleigh Section 1", "Eastleigh Section 2", "Eastleigh Section 3",
+  "Embakasi", "Embakasi Village", "Fedha", "Garden Estate", "Gigiri", "Githurai 44",
+  "Githurai 45", "Golf Course", "Greenspan", "Highridge", "Huruma", "Imara Daima",
+  "Industrial Area", "Jacaranda", "Jamhuri", "Jericho", "Kabete", "Kabiria", "Kahawa",
+  "Kahawa Sukari", "Kahawa Wendani", "Kahawa West", "Kamulu", "Kangemi", "Karen",
+  "Kariobangi North", "Kariobangi South", "Kasarani", "Kawangware", "Kayole", "Kiamaiko",
+  "Kiamumbi", "Kiambu Road", "Kibera", "Kileleshwa", "Kilimani", "Kinoo", "Kitengela",
+  "Kitisuru", "Komarock", "Korogocho", "Kyuna", "Laini Saba", "Lang'ata", "Lavington",
+  "Loresho", "Lucky Summer", "Makadara", "Makina", "Makongeni", "Maringo", "Mathare",
+  "Mbagathi", "Mihango", "Mirema", "Mlango Kubwa", "Mlolongo", "Mountain View", "Mowlem",
+  "Mugoya", "Mukuru Kwa Njenga", "Mukuru Kwa Reuben", "Muthaiga", "Mwiki", "Nairobi West",
+  "New Kitisuru", "Ngara", "Ngong", "Ngong Road", "Njiru", "Nyayo Estate", "Olympic",
+  "Pangani", "Parklands", "Pipeline", "Pumwani", "Ridgeways", "Riruta", "Riverside",
+  "Rongai", "Rosslyn", "Roysambu", "Ruaka", "Ruaraka", "Ruai", "Saika", "Savannah",
+  "South B", "South C", "Spring Valley", "Sunton", "Syokimau", "Tassia", "Thindigua",
+  "Thome", "Umoja", "Umoja 1", "Umoja 2", "Umoja 3", "Upper Hill", "Utawala", "Valley Arcade",
+  "Waithaka", "Westlands", "Woodley", "Zimmerman", "Ziwani"
 ];
 
 export const estateClusters = [
-  { name: "Westlands", x: 31, y: 37, artisans: 0, demand: "No live data" },
-  { name: "Kilimani", x: 43, y: 57, artisans: 0, demand: "No live data" },
-  { name: "Kasarani", x: 67, y: 24, artisans: 0, demand: "No live data" },
-  { name: "Embakasi", x: 76, y: 63, artisans: 0, demand: "No live data" },
-  { name: "Karen", x: 25, y: 78, artisans: 0, demand: "No live data" },
-  { name: "Eastlands", x: 69, y: 50, artisans: 0, demand: "No live data" },
-  { name: "CBD", x: 52, y: 49, artisans: 0, demand: "No live data" },
-  { name: "Dagoretti", x: 19, y: 57, artisans: 0, demand: "No live data" },
-  { name: "Rongai", x: 43, y: 88, artisans: 0, demand: "No live data" },
+  { name: "Westlands", x: 34, y: 35, artisans: 0, demand: "Building coverage" },
+  { name: "Kilimani", x: 43, y: 58, artisans: 0, demand: "Building coverage" },
+  { name: "Kasarani", x: 68, y: 25, artisans: 0, demand: "Building coverage" },
+  { name: "Embakasi", x: 76, y: 64, artisans: 0, demand: "Building coverage" },
+  { name: "Karen", x: 26, y: 78, artisans: 0, demand: "Building coverage" },
+  { name: "Umoja", x: 69, y: 51, artisans: 0, demand: "Building coverage" },
+  { name: "CBD", x: 52, y: 48, artisans: 0, demand: "Building coverage" },
+  { name: "Dagoretti", x: 19, y: 58, artisans: 0, demand: "Building coverage" },
+  { name: "Rongai", x: 43, y: 88, artisans: 0, demand: "Building coverage" },
 ];
 
 export const categories = [

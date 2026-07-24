@@ -7,13 +7,20 @@ import { NairobiMap } from "./nairobi-map";
 
 type ReviewState = "pending" | "approved" | "rejected";
 type Application = { id:string; reference:string; name:string; phone:string; trade:string; area:string; years_experience:number; documents:string[]; status:ReviewState; submitted_at:string };
-type Metrics = { active_artisans:number; open_jobs:number; pending_applications:number; supported_estates:number };
+type Breakdown = { label:string; value:number };
+type Metrics = {
+  active_artisans:number; open_jobs:number; pending_applications:number; supported_estates:number; total_users:number; total_jobs:number;
+  payments_received:number; platform_commission:number; artisan_payouts:number; funds_held:number;
+  jobs_by_status:Record<string,number>; users_by_role:Record<string,number>; jobs_by_trade:Breakdown[]; jobs_by_area:Breakdown[];
+};
+const emptyMetrics: Metrics = { active_artisans:0, open_jobs:0, pending_applications:0, supported_estates:0, total_users:0, total_jobs:0, payments_received:0, platform_commission:0, artisan_payouts:0, funds_held:0, jobs_by_status:{}, users_by_role:{}, jobs_by_trade:[], jobs_by_area:[] };
+const money = (value:number) => `KSh ${Number(value || 0).toLocaleString()}`;
 
 export function AdminDashboard() {
   const [section, setSection] = useState("overview");
   const [query, setQuery] = useState("");
   const [applications, setApplications] = useState<Application[]>([]);
-  const [metrics, setMetrics] = useState<Metrics>({ active_artisans:0, open_jobs:0, pending_applications:0, supported_estates:0 });
+  const [metrics, setMetrics] = useState<Metrics>(emptyMetrics);
   const [selectedId, setSelectedId] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const [notice, setNotice] = useState("");
@@ -51,20 +58,33 @@ export function AdminDashboard() {
       <header className="ops-header"><div><span className="kicker">Nairobi marketplace</span><h1>{nav.find(([id]) => id === section)?.[1]}</h1></div><div><button aria-label="Search applications" onClick={() => setSection("artisans")} className="icon-button"><Search size={18}/></button><button aria-label="Operations alerts" onClick={() => notify(`${metrics.pending_applications} applications need review.`)} className="icon-button notification"><Bell size={18}/>{metrics.pending_applications > 0 && <i/>}</button><span className="system-healthy"><i/>API protected</span></div></header>
       {notice && <div className="action-toast ops-toast" role="status">{notice}</div>}
 
-      {section === "overview" && <><div className="ops-alert"><div><ShieldCheck/><span><strong>{metrics.pending_applications} applications need a decision</strong><small>Data is loaded from the live operations API.</small></span></div><button onClick={() => setSection("artisans")}>Review queue <ChevronRight size={16}/></button></div><div className="ops-metrics"><article><span>Active artisans</span><strong>{metrics.active_artisans}</strong><small>Verified accounts</small></article><article><span>Open jobs</span><strong>{metrics.open_jobs}</strong><small>Across Nairobi</small></article><article><span>Pending applications</span><strong>{metrics.pending_applications}</strong><small>Awaiting a decision</small></article><article><span>Supported estates</span><strong>{metrics.supported_estates}</strong><small>Configured coverage</small></article></div><EmptyOperations title="Analytics unlock with production activity" text="Charts and trends intentionally remain empty until real jobs, payments and reviews exist." /></>}
+      {section === "overview" && <><div className="ops-alert"><div><ShieldCheck/><span><strong>{metrics.pending_applications} applications need a decision</strong><small>Every figure below is loaded from the protected operations API.</small></span></div><button onClick={() => setSection("artisans")}>Review queue <ChevronRight size={16}/></button></div>
+        <div className="ops-metrics"><Metric label="Payments received" value={money(metrics.payments_received)} note="Completed transactions"/><Metric label="Platform commission" value={money(metrics.platform_commission)} note="Recorded marketplace fees"/><Metric label="Artisan payouts" value={money(metrics.artisan_payouts)} note="Net value due"/><Metric label="Funds held" value={money(metrics.funds_held)} note="Protected in active jobs"/></div>
+        <div className="ops-grid"><AnalyticsCard title="Job funnel" eyebrow={`${metrics.total_jobs} total jobs`} data={Object.entries(metrics.jobs_by_status).map(([label,value]) => ({label:label.replaceAll("_"," "),value}))}/><AnalyticsCard title="Demand by trade" eyebrow="Live job requests" data={metrics.jobs_by_trade}/></div>
+        <div className="ops-grid lower"><AnalyticsCard title="Marketplace accounts" eyebrow={`${metrics.total_users} registered users`} data={Object.entries(metrics.users_by_role).map(([label,value]) => ({label,value}))}/><AnalyticsCard title="Demand hotspots" eyebrow={`${metrics.supported_estates} supported areas`} data={metrics.jobs_by_area}/></div>
+      </>}
 
       {section === "artisans" && <div className="review-layout"><section className="review-list"><div className="review-toolbar"><div><span className="kicker">Trust operations</span><h2>Verification queue</h2></div><label><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search applications"/></label></div>{filtered.length ? filtered.map((item) => <button onClick={() => setSelectedId(item.id)} className={`review-row ${selectedId === item.id ? "selected" : ""}`} key={item.id}><span className="identity-badge">{item.name.split(" ").map((part) => part[0]).join("").slice(0,2)}</span><div><strong>{item.name}</strong><small>{item.trade} · {item.area}</small></div><span className={`status-chip ${item.status}`}>{item.status}</span><ChevronRight size={16}/></button>) : <EmptyOperations title="No applications" text="New artisan applications will appear here automatically." compact/>}</section>
         {selected ? <aside className="review-detail"><div className="application-head"><span className="identity-badge large">{selected.name.split(" ").map((part) => part[0]).join("").slice(0,2)}</span><div><span className="kicker">{selected.reference}</span><h2>{selected.name}</h2><p>{selected.trade} · {selected.area}</p></div></div><dl><div><dt>Mobile</dt><dd>{selected.phone}</dd></div><div><dt>Experience</dt><dd>{selected.years_experience} years</dd></div><div><dt>Evidence</dt><dd>{selected.documents.length} files</dd></div><div><dt>Submitted</dt><dd>{new Date(selected.submitted_at).toLocaleDateString()}</dd></div></dl><h3>Submitted evidence</h3><div className="document-grid">{selected.documents.map((document) => <button onClick={() => notify(`${document} opened in secure review.`)} key={document}><FileCheck2/><span><strong>{document.replaceAll("_"," ")}</strong><small>Protected file</small></span><Check/></button>)}</div>{error && <p className="form-error">{error}</p>}<div className="review-actions"><button disabled={reviewing} onClick={() => void review("rejected")} className="button reject"><X size={16}/>Decline</button><button disabled={reviewing} onClick={() => void review("approved")} className="button approve"><BadgeCheck size={16}/>Approve artisan</button></div></aside> : <aside className="review-detail"><EmptyOperations title="Select an application" text="Applicant identity and evidence will appear here." compact/></aside>}
       </div>}
 
       {section === "coverage" && <section className="analytics-card coverage-admin"><div className="card-heading"><div><span className="kicker">Coverage configuration</span><h2>Nairobi service map</h2></div></div><NairobiMap/></section>}
-      {section === "jobs" && <EmptyOperations title="No operational jobs yet" text="Live jobs and disputes will appear after clients begin posting." />}
-      {section === "people" && <EmptyOperations title="No marketplace accounts yet" text="Registered clients, artisans and estate teams will appear here." />}
-      {section === "finance" && <EmptyOperations title="No financial activity yet" text="Payouts, platform fees and reserves will appear after payment integration records transactions." />}
+      {section === "jobs" && <section className="ops-data-page"><div className="ops-metrics"><Metric label="All jobs" value={metrics.total_jobs} note="Lifetime requests"/><Metric label="Open jobs" value={metrics.open_jobs} note="Awaiting a match"/><Metric label="In progress" value={metrics.jobs_by_status.in_progress || 0} note="Work underway"/><Metric label="Completed" value={metrics.jobs_by_status.completed || 0} note="Closed successfully"/></div><div className="ops-grid"><AnalyticsCard title="Job lifecycle" eyebrow="Operational funnel" data={Object.entries(metrics.jobs_by_status).map(([label,value]) => ({label:label.replaceAll("_"," "),value}))}/><AnalyticsCard title="Service demand" eyebrow="Requests by trade" data={metrics.jobs_by_trade}/></div></section>}
+      {section === "people" && <section className="ops-data-page"><div className="ops-metrics"><Metric label="Registered users" value={metrics.total_users} note="All role-protected accounts"/><Metric label="Verified artisans" value={metrics.active_artisans} note="Approved supply"/><Metric label="Pending reviews" value={metrics.pending_applications} note="Trust queue"/><Metric label="Coverage" value={metrics.supported_estates} note="Nairobi service areas"/></div><AnalyticsCard title="Accounts by role" eyebrow="Marketplace composition" data={Object.entries(metrics.users_by_role).map(([label,value]) => ({label,value}))}/></section>}
+      {section === "finance" && <section className="ops-data-page"><div className="finance-hero"><div><span>Gross marketplace volume</span><strong>{money(metrics.payments_received)}</strong><small>Completed transactions only</small></div><CircleDollarSign size={34}/></div><div className="ops-metrics"><Metric label="Commission earned" value={money(metrics.platform_commission)} note="Platform revenue"/><Metric label="Artisan payouts" value={money(metrics.artisan_payouts)} note="Net artisan earnings"/><Metric label="Funds protected" value={money(metrics.funds_held)} note="Held until completion"/><Metric label="Take rate" value={metrics.payments_received ? `${((metrics.platform_commission / metrics.payments_received) * 100).toFixed(1)}%` : "0%"} note="Commission / GMV"/></div><EmptyOperations title="Transaction ledger ready" text={metrics.payments_received ? "Finance totals are calculated from completed payment ledger entries." : "No payment provider has recorded a completed transaction yet; no financial figures are seeded."}/></section>}
     </section>
   </main>;
 }
 
 function EmptyOperations({ title, text, compact = false }: { title:string; text:string; compact?:boolean }) {
   return <section className={`analytics-card empty-operations ${compact ? "compact" : ""}`}><span className="kicker">Live data only</span><h2>{title}</h2><p>{text}</p></section>;
+}
+
+function Metric({ label,value,note }:{ label:string;value:string|number;note:string }) {
+  return <article><span>{label}</span><strong>{value}</strong><small>{note}</small></article>;
+}
+
+function AnalyticsCard({ title,eyebrow,data }:{ title:string;eyebrow:string;data:Breakdown[] }) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+  return <section className="analytics-card live-chart"><div className="card-heading"><div><span className="kicker">{eyebrow}</span><h2>{title}</h2></div></div>{data.length ? <div className="bar-chart">{data.map((item) => <div className="bar-row" key={item.label}><span>{item.label}</span><div><i style={{width:`${(item.value/max)*100}%`}}/></div><strong>{item.value}</strong></div>)}</div> : <div className="chart-empty"><strong>No activity yet</strong><span>The chart will populate from real marketplace events.</span></div>}</section>;
 }

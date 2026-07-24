@@ -92,6 +92,30 @@ class JobEvent(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class PaymentStatus(str, Enum):
+    pending = "pending"
+    held = "held"
+    completed = "completed"
+    refunded = "refunded"
+    failed = "failed"
+
+
+class PaymentTransaction(Base):
+    __tablename__ = "payment_transactions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    client_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    artisan_id: Mapped[str | None] = mapped_column(ForeignKey("artisans.id"), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="")
+    provider_reference: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    platform_fee: Mapped[float] = mapped_column(Float, default=0)
+    artisan_net: Mapped[float] = mapped_column(Float, default=0)
+    status: Mapped[PaymentStatus] = mapped_column(SqlEnum(PaymentStatus), default=PaymentStatus.pending, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ApplicationStatus(str, Enum):
     pending = "pending"
     approved = "approved"
