@@ -13,6 +13,7 @@ from app.auth import hash_password
 from app.database import SessionLocal
 from app.main import app
 from app.models import User, UserRole
+from app.config import Settings
 
 
 def register(client: TestClient, email: str, account_type: str = "client") -> str:
@@ -35,6 +36,12 @@ def test_health_and_empty_database():
     with TestClient(app) as client:
         assert client.get("/health").json()["status"] == "ok"
         assert client.get("/v1/artisans").json() == []
+
+
+def test_cors_configuration_accepts_render_formats():
+    assert Settings(cors_origins="https://app.vercel.app", _env_file=None).cors_origin_list == ["https://app.vercel.app"]
+    assert Settings(cors_origins="https://one.app, https://two.app/", _env_file=None).cors_origin_list == ["https://one.app", "https://two.app"]
+    assert Settings(cors_origins='["https://one.app","https://two.app"]', _env_file=None).cors_origin_list == ["https://one.app", "https://two.app"]
 
 
 def test_nairobi_estates_are_exposed():

@@ -1,11 +1,12 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import json
 
 
 class Settings(BaseSettings):
     app_name: str = "Mafundi Mtaani API"
     environment: str = "development"
     database_url: str = "sqlite:///./mafundi.db"
-    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_origins: str = '["http://localhost:3000","http://127.0.0.1:3000"]'
     jwt_secret: str = "development-only-change-me"
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 60
@@ -34,6 +35,17 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: object) -> None:
         if self.environment == "production" and self.jwt_secret == "development-only-change-me":
             raise ValueError("MAFUNDI_JWT_SECRET must be configured in production")
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        value = self.cors_origins.strip()
+        if value.startswith("["):
+            try:
+                parsed = json.loads(value)
+                return [str(item).strip().rstrip("/") for item in parsed if str(item).strip()]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return [item.strip().rstrip("/") for item in value.split(",") if item.strip()]
 
 
 settings = Settings()
