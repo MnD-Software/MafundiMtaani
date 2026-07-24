@@ -8,6 +8,8 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
       - key: MAFUNDI_ENVIRONMENT
         value: production
       - key: MAFUNDI_DATABASE_URL
