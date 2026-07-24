@@ -1,0 +1,29 @@
+# dependencies and builds
+node_modules/
+node_modules.incomplete/
+.next/
+out/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# runtime data and secrets
+*.db
+*.sqlite
+.env
+.env.*
+!.env.example
+
+# editor and OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# logs and coverage
+*.log
+coverage/
+.coverage

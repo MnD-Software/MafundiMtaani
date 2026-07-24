@@ -1,0 +1,37 @@
+.upload-box input,.document-upload input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.upload-box,.document-upload{cursor:pointer;position:relative}
+.action-toast{position:fixed;z-index:150;right:28px;top:28px;background:#101410;color:#fff;padding:13px 17px;border-radius:12px;box-shadow:0 14px 45px rgba(0,0,0,.22);font-size:10px;font-weight:700;animation:toast-in .22s ease}
+.ops-toast{top:22px;right:25px}
+@keyframes toast-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.contact-artisan-shell{min-height:calc(100vh - 78px);background:#f4f5f1;padding:45px max(5vw,20px)}
+.contact-artisan-shell>.back-link{max-width:680px;margin:0 auto 20px}
+.contact-card{max-width:680px;margin:auto;background:#fff;border:1px solid var(--line);border-radius:24px;padding:34px;box-shadow:var(--shadow)}
+.contact-heading{margin:17px 0 28px}.contact-heading h1{font-size:36px;letter-spacing:-.045em;margin:7px 0}.contact-heading p{font-size:10px;color:var(--muted)}
+.contact-card form label{font-size:10px;font-weight:750;display:block;margin:17px 0}.contact-card textarea,.contact-card input{width:100%;border:1px solid var(--line);border-radius:11px;padding:13px;margin-top:8px}
+.contact-assurance{display:flex;align-items:center;gap:8px;background:#eaf5ef;color:var(--green-dark);padding:12px;border-radius:10px;font-size:9px;margin-bottom:15px}
+.services-section .category-grid{grid-template-columns:repeat(3,1fr);gap:18px}
+.services-section .category-card{min-height:220px;border:0;border-radius:18px;background:#f2f3f0;padding:26px;display:grid;grid-template-columns:1fr 120px;grid-template-rows:auto auto 1fr auto;text-align:left;overflow:hidden}
+.services-section .category-card .category-icon{grid-column:2;grid-row:1/5;width:112px;height:112px;border-radius:28px;align-self:center;justify-self:end;margin:0;transform:rotate(-4deg)}
+.services-section .category-card .category-icon svg{width:52px;height:52px;stroke-width:1.5}
+.services-section .category-card>strong{grid-column:1;font-size:22px;letter-spacing:-.035em}
+.services-section .category-card>span:not(.category-icon){grid-column:1;font-size:11px;line-height:1.55;max-width:190px}
+.category-details{grid-column:1;align-self:end;justify-self:start;background:#fff;border-radius:24px;padding:10px 16px;font-style:normal;font-size:10px;font-weight:800}
+.services-section .category-arrow{display:none}
+.auth-shell{min-height:calc(100vh - 78px);display:grid;place-items:center;background:#f4f5f1;padding:35px 16px}
+.auth-card{width:min(440px,100%);background:#fff;border:1px solid var(--line);border-radius:24px;padding:34px;box-shadow:var(--shadow)}
+.auth-card.centered{text-align:center}.auth-icon{height:52px;width:52px;border-radius:15px;background:#e4f1ea;color:var(--green);display:grid;place-items:center;margin-bottom:20px}.auth-card.centered .auth-icon{margin:0 auto 20px}
+.auth-card h1{font-size:38px;letter-spacing:-.05em;margin:8px 0}.auth-card>p{font-size:11px;line-height:1.6;color:var(--muted)}
+.auth-card label{display:block;font-size:10px;font-weight:800;margin:17px 0}.auth-card input{display:block;width:100%;margin-top:7px;border:1px solid var(--line);border-radius:11px;padding:13px}
+.empty-operations{margin-top:14px;text-align:center;padding:55px}.empty-operations.compact{margin:12px 0;padding:25px}.empty-operations h2{font-size:20px}.empty-operations p{font-size:10px;color:var(--muted)}
+@media(max-width:760px){
+  .mobile-app-nav{grid-template-columns:none!important;grid-auto-flow:column;grid-auto-columns:1fr}
+  .dashboard-sidebar{bottom:67px!important}
+  .dashboard-main{padding-bottom:150px!important}
+  .action-toast{top:14px;left:14px;right:14px;text-align:center}
+  .contact-artisan-shell{padding:28px 14px 100px}.contact-card{padding:22px}.contact-heading h1{font-size:30px}
+  .job-form,.signup-form,.contact-card{width:100%;min-width:0}
+  input,select,textarea{font-size:16px!important}
+  .services-section .category-grid{display:grid;grid-template-columns:1fr;overflow:visible}
+  .services-section .category-card{min-width:0;grid-template-columns:1fr 92px;min-height:190px;padding:22px}
+  .services-section .category-card .category-icon{width:86px;height:86px}.services-section .category-card .category-icon svg{width:40px;height:40px}
+}
