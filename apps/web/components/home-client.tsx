@@ -6,8 +6,10 @@ import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, Locat
 import { categories, nairobiEstates, type Artisan } from "@/lib/data";
 import { iconMap } from "./icons";
 import { NairobiMap } from "./nairobi-map";
+import { useExperience } from "./experience-provider";
 
 export function HomeClient() {
+  const {language}=useExperience();const sw=language==="sw";
   const [query, setQuery] = useState("");
   const [area, setArea] = useState("Kilimani");
   const [active, setActive] = useState("All");
@@ -85,12 +87,12 @@ export function HomeClient() {
         </div>
         <section className="hero">
           <div className="hero-copy">
-            <div className="eyebrow"><span className="live-dot" /> Nairobi-first verified artisan network</div>
-            <h1>Trusted help,<br /><span>right around the corner.</span></h1>
-            <p>Book skilled, background-checked artisans in minutes. Clear pricing, real-time updates, and work guaranteed.</p>
+            <div className="eyebrow"><span className="live-dot" />{sw?"Mtandao wa mafundi waliothibitishwa Nairobi":"Nairobi-first verified artisan network"}</div>
+            <h1>{sw?"Msaada wa kuaminika,":"Trusted help,"}<br /><span>{sw?"karibu nawe.":"right around the corner."}</span></h1>
+            <p>{sw?"Agiza mafundi wenye ujuzi na waliokaguliwa kwa dakika. Bei wazi, taarifa za moja kwa moja na kazi yenye dhamana.":"Book skilled, background-checked artisans in minutes. Clear pricing, real-time updates, and work guaranteed."}</p>
             <form ref={searchRef} className="search-box" onSubmit={submitSearch}>
               <label>
-                <span>What do you need?</span>
+                <span>{sw?"Unahitaji nini?":"What do you need?"}</span>
                 <div><Search size={19} /><input value={query} onFocus={() => setSearchOpen(true)} onChange={(e) => { setQuery(e.target.value); setSearchOpen(true); }} placeholder="Try “plumber” or “Kilimani”" /></div>
               </label>
               <div className="search-divider" />

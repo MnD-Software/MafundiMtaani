@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 const roleRoutes: Array<[string, string[]]> = [
   ["/admin", ["admin", "support"]],
-  ["/dashboard", ["artisan"]],
+  ["/dashboard", ["client", "estate_manager", "artisan"]],
+  ["/jobs", ["client", "estate_manager", "artisan", "admin", "support"]],
   ["/post-job", ["client", "estate_manager"]],
 ];
 
@@ -20,4 +21,4 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/admin/:path*", "/dashboard/:path*", "/post-job/:path*"] };
+export const config = { matcher: ["/admin/:path*", "/dashboard/:path*", "/post-job/:path*", "/jobs/:path*"] };

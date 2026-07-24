@@ -17,6 +17,18 @@ class Settings(BaseSettings):
     mpesa_base_url: str = "https://sandbox.safaricom.co.ke"
     google_maps_key: str = ""
     whatsapp_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    sms_api_key: str = ""
+    sms_username: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "info@mafundimtaani.co.ke"
+    web_push_public_key: str = ""
+    web_push_private_key: str = ""
+    platform_fee_rate: float = 0.10
+    tax_rate: float = 0.0
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MAFUNDI_")
 
     def model_post_init(self, __context: object) -> None:

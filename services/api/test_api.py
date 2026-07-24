@@ -119,3 +119,27 @@ def test_quote_job_room_tracking_and_verified_review():
         integrations = client.get("/v1/integrations/status", headers={"Authorization":f"Bearer {admin_token}"})
         assert integrations.status_code == 200
         assert integrations.json()["in_app_notifications"]["configured"] is True
+
+
+def test_growth_billing_devices_and_risk_controls():
+    with TestClient(app) as client:
+        client_token = register(client, "growth-client@test.local")
+        admin_token = create_admin()
+        promotion = client.post("/v1/admin/promotions", headers={"Authorization":f"Bearer {admin_token}"}, json={"code":"WELCOME10","description":"Welcome reward","discount_percent":10,"max_discount":500,"usage_limit":10})
+        assert promotion.status_code == 201
+        discount = client.get("/v1/promotions/WELCOME10?amount=10000", headers={"Authorization":f"Bearer {client_token}"})
+        assert discount.status_code == 200
+        assert discount.json()["discount"] == 500
+        referral = client.get("/v1/referrals/me", headers={"Authorization":f"Bearer {client_token}"})
+        assert referral.status_code == 200
+        assert referral.json()["code"].startswith("MM-")
+        subscription = client.post("/v1/subscriptions", headers={"Authorization":f"Bearer {client_token}"}, json={"plan":"pro"})
+        assert subscription.status_code == 200
+        assert subscription.json()["payment_required"] is True
+        assert client.post("/v1/devices", headers={"Authorization":f"Bearer {client_token}"}, json={"token":"test-device-token-123","platform":"web"}).status_code == 201
+        assert client.get("/v1/invoices", headers={"Authorization":f"Bearer {client_token}"}).json() == []
+        risky_job = {"client_name":"Risk Client","client_phone":"+254700555666","trade":"Construction","title":"Major property renovation","description":"A high-value full property renovation requiring review.","area":"Karen","urgency":"this_month","budget_min":900000,"budget_max":1500000}
+        assert client.post("/v1/jobs", headers={"Authorization":f"Bearer {client_token}"}, json=risky_job).status_code == 201
+        signals = client.get("/v1/admin/risk-signals", headers={"Authorization":f"Bearer {admin_token}"})
+        assert signals.status_code == 200
+        assert any(item["signal_type"] == "high_value_job" for item in signals.json())

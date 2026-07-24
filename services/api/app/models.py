@@ -225,6 +225,93 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Promotion(Base):
+    __tablename__ = "promotions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    description: Mapped[str] = mapped_column(String(180), default="")
+    discount_percent: Mapped[float] = mapped_column(Float, default=0)
+    max_discount: Mapped[float] = mapped_column(Float, default=0)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    usage_limit: Mapped[int] = mapped_column(Integer, default=0)
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Referral(Base):
+    __tablename__ = "referrals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    referrer_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    referred_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    reward_amount: Mapped[float] = mapped_column(Float, default=0)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    plan: Mapped[str] = mapped_column(String(40), default="free")
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    monthly_amount: Mapped[float] = mapped_column(Float, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    renews_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    number: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    transaction_id: Mapped[str] = mapped_column(ForeignKey("payment_transactions.id"), unique=True, index=True)
+    client_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    subtotal: Mapped[float] = mapped_column(Float, default=0)
+    platform_fee: Mapped[float] = mapped_column(Float, default=0)
+    tax_amount: Mapped[float] = mapped_column(Float, default=0)
+    total: Mapped[float] = mapped_column(Float, default=0)
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DeviceToken(Base):
+    __tablename__ = "device_tokens"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    token: Mapped[str] = mapped_column(String(500), unique=True)
+    platform: Mapped[str] = mapped_column(String(30), default="web")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RiskSignal(Base):
+    __tablename__ = "risk_signals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True, index=True)
+    signal_type: Mapped[str] = mapped_column(String(80), index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="medium", index=True)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentVerification(Base):
+    __tablename__ = "document_verifications"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    application_id: Mapped[str] = mapped_column(ForeignKey("artisan_applications.id"), index=True)
+    document_type: Mapped[str] = mapped_column(String(80), index=True)
+    file_reference: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="manual")
+    confidence: Mapped[float] = mapped_column(Float, default=0)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ApplicationStatus(str, Enum):
     pending = "pending"
     approved = "approved"

@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 import httpx
+import smtplib
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -12,7 +14,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, Dispute, DisputeStatus, Favorite, Job, JobEvent, JobMessage, JobMilestone, JobStatus, MilestoneStatus, Notification, PaymentStatus, PaymentTransaction, Quote, QuoteStatus, Review, User, UserRole
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, Invoice, Job, JobEvent, JobMessage, JobMilestone, JobStatus, MilestoneStatus, Notification, PaymentStatus, PaymentTransaction, Promotion, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, User, UserRole
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -122,6 +124,9 @@ def create_job(data: JobCreate, db: Session = Depends(get_db), user: User = Depe
     db.add(job)
     db.flush()
     db.add(JobEvent(job_id=job.id, event_type="job.created", actor_id=user.id, payload={"reference": reference}))
+    recent_jobs = db.scalar(select(func.count(Job.id)).where(Job.client_user_id == user.id, Job.created_at >= datetime.now(timezone.utc) - timedelta(minutes=10))) or 0
+    if data.budget_max >= 1_000_000 or recent_jobs >= 5:
+        db.add(RiskSignal(user_id=user.id, job_id=job.id, signal_type="unusual_job_velocity" if recent_jobs >= 5 else "high_value_job", severity="high", score=85, details={"recent_jobs":recent_jobs,"budget_max":data.budget_max}))
     db.commit()
     db.refresh(job)
     return job
@@ -168,6 +173,9 @@ def create_application(data: ApplicationCreate, db: Session = Depends(get_db), u
     reference = f"AP-{1050 + (db.scalar(select(func.count(ArtisanApplication.id))) or 0)}"
     application = ArtisanApplication(reference=reference, user_id=user.id, **data.model_dump())
     db.add(application)
+    db.flush()
+    for document in data.documents:
+        db.add(DocumentVerification(application_id=application.id, document_type=document, file_reference=document, status="pending", provider="manual"))
     db.commit()
     db.refresh(application)
     return application
@@ -517,7 +525,7 @@ async def mpesa_checkout(data: CheckoutCreate, db: Session = Depends(get_db), us
     if response.status_code != 200:
         raise HTTPException(502, "M-Pesa checkout request failed")
     payload = response.json()
-    fee = round(data.amount * .10, 2)
+    fee = round(data.amount * settings.platform_fee_rate, 2)
     transaction = PaymentTransaction(job_id=job.id, client_user_id=user.id, artisan_id=job.assigned_artisan_id, provider="mpesa", provider_reference=payload["CheckoutRequestID"], amount=data.amount, platform_fee=fee, artisan_net=data.amount-fee, status=PaymentStatus.pending)
     db.add(transaction); db.commit()
     return {"checkout_request_id":payload["CheckoutRequestID"],"status":"pending","message":"Confirm the M-Pesa prompt on your phone."}
@@ -532,8 +540,156 @@ def mpesa_callback(payload: dict, db: Session = Depends(get_db)) -> dict:
         transaction.status = PaymentStatus.held if callback.get("ResultCode") == 0 else PaymentStatus.failed
         if transaction.status == PaymentStatus.held:
             transaction.completed_at = datetime.now(timezone.utc)
+            if not db.scalar(select(Invoice).where(Invoice.transaction_id == transaction.id)):
+                sequence = (db.scalar(select(func.count(Invoice.id))) or 0) + 1
+                tax = round(transaction.platform_fee * settings.tax_rate, 2)
+                db.add(Invoice(number=f"MM-{datetime.now().year}-{sequence:06d}", transaction_id=transaction.id, client_user_id=transaction.client_user_id, subtotal=transaction.amount, platform_fee=transaction.platform_fee, tax_amount=tax, total=transaction.amount, currency="KES"))
         db.commit()
     return {"ResultCode":0,"ResultDesc":"Accepted"}
+
+
+class PromotionCreate(BaseModel):
+    code: str = Field(min_length=3, max_length=40)
+    description: str = Field(default="", max_length=180)
+    discount_percent: float = Field(ge=0, le=100)
+    max_discount: float = Field(default=0, ge=0)
+    usage_limit: int = Field(default=0, ge=0)
+
+
+class SubscriptionCreate(BaseModel):
+    plan: str = Field(pattern="^(free|pro|business)$")
+
+
+class DeviceCreate(BaseModel):
+    token: str = Field(min_length=8, max_length=500)
+    platform: str = Field(default="web", pattern="^(web|android|ios)$")
+
+
+class DispatchCreate(BaseModel):
+    user_id: str
+    title: str = Field(min_length=2, max_length=180)
+    body: str = Field(min_length=2, max_length=2000)
+    channels: list[str] = Field(default_factory=lambda:["in_app"])
+
+
+@app.get("/v1/referrals/me")
+def my_referral(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    referral = db.scalar(select(Referral).where(Referral.referrer_user_id == user.id, Referral.referred_user_id.is_(None)))
+    if not referral:
+        referral = Referral(referrer_user_id=user.id, code=f"MM-{user.id.replace('-','')[:8].upper()}", reward_amount=0)
+        db.add(referral); db.commit(); db.refresh(referral)
+    completed = db.scalar(select(func.count(Referral.id)).where(Referral.referrer_user_id == user.id, Referral.status == "rewarded")) or 0
+    rewards = db.scalar(select(func.coalesce(func.sum(Referral.reward_amount),0)).where(Referral.referrer_user_id == user.id, Referral.status == "rewarded")) or 0
+    return {"code":referral.code,"completed_referrals":completed,"rewards_earned":rewards}
+
+
+@app.get("/v1/promotions/{code}")
+def validate_promotion(code: str, amount: float = Query(gt=0), db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
+    now = datetime.now(timezone.utc)
+    promotion = db.scalar(select(Promotion).where(func.upper(Promotion.code) == code.upper(), Promotion.active.is_(True), Promotion.starts_at <= now, or_(Promotion.ends_at.is_(None),Promotion.ends_at >= now)))
+    if not promotion or (promotion.usage_limit and promotion.uses >= promotion.usage_limit):
+        raise HTTPException(404, "Promotion is unavailable")
+    discount = amount * promotion.discount_percent / 100
+    if promotion.max_discount:
+        discount = min(discount, promotion.max_discount)
+    return {"code":promotion.code,"discount":round(discount,2),"payable":round(max(amount-discount,0),2),"description":promotion.description}
+
+
+@app.post("/v1/admin/promotions", status_code=201)
+def create_promotion(data: PromotionCreate, db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin))) -> dict:
+    promotion = Promotion(code=data.code.upper(), **data.model_dump(exclude={"code"}))
+    db.add(promotion)
+    try: db.commit()
+    except IntegrityError as exc:
+        db.rollback(); raise HTTPException(409,"Promotion code already exists") from exc
+    return {"id":promotion.id,"code":promotion.code,"active":promotion.active}
+
+
+@app.get("/v1/subscriptions/me")
+def my_subscription(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    item = db.scalar(select(Subscription).where(Subscription.user_id == user.id, Subscription.status.in_(["active","pending"])).order_by(Subscription.started_at.desc()))
+    return {"plan":item.plan if item else "free","status":item.status if item else "active","monthly_amount":item.monthly_amount if item else 0,"renews_at":item.renews_at if item else None}
+
+
+@app.post("/v1/subscriptions")
+def choose_subscription(data: SubscriptionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    prices={"free":0,"pro":999,"business":2999}
+    for current in db.scalars(select(Subscription).where(Subscription.user_id == user.id, Subscription.status.in_(["active","pending"]))).all():
+        current.status="cancelled"
+    item=Subscription(user_id=user.id,plan=data.plan,monthly_amount=prices[data.plan],status="active" if data.plan=="free" else "pending")
+    db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"plan":item.plan,"status":item.status,"monthly_amount":item.monthly_amount,"payment_required":item.status=="pending"}
+
+
+@app.get("/v1/invoices")
+def list_invoices(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    query=select(Invoice)
+    if user.role in {UserRole.client,UserRole.estate_manager}: query=query.where(Invoice.client_user_id==user.id)
+    elif user.role==UserRole.artisan:
+        artisan=user_artisan(db,user)
+        query=query.join(PaymentTransaction,Invoice.transaction_id==PaymentTransaction.id).where(PaymentTransaction.artisan_id==(artisan.id if artisan else ""))
+    elif user.role not in {UserRole.admin,UserRole.support}: raise HTTPException(403,"Not authorized")
+    rows=db.scalars(query.order_by(Invoice.issued_at.desc())).all()
+    return [{"id":row.id,"number":row.number,"subtotal":row.subtotal,"platform_fee":row.platform_fee,"tax_amount":row.tax_amount,"total":row.total,"currency":row.currency,"issued_at":row.issued_at} for row in rows]
+
+
+@app.get("/v1/admin/reconciliation")
+def reconciliation(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> dict:
+    by_status=db.execute(select(PaymentTransaction.status,func.count(PaymentTransaction.id),func.coalesce(func.sum(PaymentTransaction.amount),0)).group_by(PaymentTransaction.status)).all()
+    return {"payments":[{"status":status.value,"count":count,"amount":amount} for status,count,amount in by_status],"invoice_count":db.scalar(select(func.count(Invoice.id))) or 0,"un_invoiced":db.scalar(select(func.count(PaymentTransaction.id)).outerjoin(Invoice,Invoice.transaction_id==PaymentTransaction.id).where(Invoice.id.is_(None),PaymentTransaction.status.in_([PaymentStatus.held,PaymentStatus.completed]))) or 0}
+
+
+@app.post("/v1/devices", status_code=201)
+def register_device(data: DeviceCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    item=db.scalar(select(DeviceToken).where(DeviceToken.token==data.token))
+    if item: item.user_id=user.id;item.platform=data.platform;item.active=True
+    else: item=DeviceToken(user_id=user.id,**data.model_dump());db.add(item)
+    db.commit();db.refresh(item)
+    return {"id":item.id,"platform":item.platform,"active":item.active}
+
+
+async def deliver_notification(user: User, title: str, body: str, channels: list[str]) -> dict:
+    results={"in_app":"queued"}
+    if "email" in channels:
+        if settings.smtp_host and user.email:
+            message=EmailMessage();message["Subject"]=title;message["From"]=settings.smtp_from;message["To"]=user.email;message.set_content(body)
+            try:
+                with smtplib.SMTP(settings.smtp_host,settings.smtp_port,timeout=15) as smtp:
+                    smtp.starttls()
+                    if settings.smtp_username: smtp.login(settings.smtp_username,settings.smtp_password)
+                    smtp.send_message(message)
+                results["email"]="sent"
+            except Exception: results["email"]="failed"
+        else: results["email"]="not_configured"
+    if "whatsapp" in channels:
+        if settings.whatsapp_token and settings.whatsapp_phone_number_id and user.phone:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response=await client.post(f"https://graph.facebook.com/v22.0/{settings.whatsapp_phone_number_id}/messages",headers={"Authorization":f"Bearer {settings.whatsapp_token}"},json={"messaging_product":"whatsapp","to":user.phone.replace("+",""),"type":"text","text":{"body":f"{title}\n{body}"}})
+            results["whatsapp"]="sent" if response.is_success else "failed"
+        else: results["whatsapp"]="not_configured"
+    if "sms" in channels: results["sms"]="not_configured" if not settings.sms_api_key else "queued"
+    if "push" in channels: results["push"]="not_configured" if not settings.web_push_private_key else "queued"
+    return results
+
+
+@app.post("/v1/admin/notifications/dispatch")
+async def dispatch_notification(data: DispatchCreate, db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> dict:
+    recipient=db.get(User,data.user_id)
+    if not recipient: raise HTTPException(404,"Recipient not found")
+    db.add(Notification(user_id=recipient.id,title=data.title,body=data.body,channel=",".join(data.channels)));db.commit()
+    return {"delivery":await deliver_notification(recipient,data.title,data.body,data.channels)}
+
+
+@app.get("/v1/admin/risk-signals")
+def list_risk_signals(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> list[dict]:
+    rows=db.scalars(select(RiskSignal).order_by(RiskSignal.created_at.desc()).limit(100)).all()
+    return [{"id":row.id,"user_id":row.user_id,"job_id":row.job_id,"signal_type":row.signal_type,"severity":row.severity,"score":row.score,"details":row.details,"status":row.status,"created_at":row.created_at} for row in rows]
+
+
+@app.get("/v1/admin/document-verifications")
+def list_document_verifications(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> list[dict]:
+    rows=db.scalars(select(DocumentVerification).order_by(DocumentVerification.created_at.desc())).all()
+    return [{"id":row.id,"application_id":row.application_id,"document_type":row.document_type,"status":row.status,"provider":row.provider,"confidence":row.confidence,"expires_at":row.expires_at,"notes":row.notes} for row in rows]
 
 
 @app.get("/v1/admin/metrics")
