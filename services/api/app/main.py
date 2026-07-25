@@ -109,6 +109,27 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     return {"access_token": create_access_token(user), "user": user}
 
 
+class GoogleLogin(BaseModel):
+    id_token:str=Field(min_length=20,max_length=5000)
+
+
+@app.post("/v1/auth/google",response_model=TokenOut)
+async def google_login(data:GoogleLogin,db:Session=Depends(get_db)):
+    if not settings.google_client_id: raise HTTPException(503,"Google sign-in is not configured")
+    async with httpx.AsyncClient(timeout=15) as client:
+        response=await client.get("https://oauth2.googleapis.com/tokeninfo",params={"id_token":data.id_token})
+    if not response.is_success: raise HTTPException(401,"Google identity could not be verified")
+    identity=response.json()
+    if identity.get("aud")!=settings.google_client_id or identity.get("email_verified")!="true": raise HTTPException(401,"Google identity could not be verified")
+    email=identity["email"].lower().strip()
+    user=db.scalar(select(User).where(User.email==email))
+    if user and user.role not in {UserRole.client,UserRole.estate_manager}: raise HTTPException(403,"This account cannot use this sign-in page")
+    if not user:
+        user=User(email=email,password_hash=hash_password(uuid4().hex+uuid4().hex),name=identity.get("name") or email.split("@")[0],phone="",role=UserRole.client)
+        db.add(user);db.commit();db.refresh(user)
+    return {"access_token":create_access_token(user),"user":user}
+
+
 @app.get("/v1/auth/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return user

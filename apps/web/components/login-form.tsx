@@ -74,6 +74,14 @@ export function LoginForm({portal="client"}:{portal?:"client"|"artisan"|"operati
             </>
           )}
         </button>
+        {portal === "client" && (
+          <>
+            <div className="auth-divider"><span>or</span></div>
+            <a className="button button-outline button-wide google-signin" href="/api/auth/google/start">
+              <span aria-hidden="true">G</span> Continue with Google
+            </a>
+          </>
+        )}
         <div className="auth-divider">
           <span>New to Mafundi?</span>
         </div>

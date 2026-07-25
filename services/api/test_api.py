@@ -45,6 +45,12 @@ def test_cors_configuration_accepts_render_formats():
     assert Settings(cors_origins='["https://one.app","https://two.app"]', _env_file=None).cors_origin_list == ["https://one.app", "https://two.app"]
 
 
+def test_google_login_is_provider_gated():
+    with TestClient(app) as client:
+        response=client.post("/v1/auth/google",json={"id_token":"not-a-real-google-token-value"})
+        assert response.status_code==503
+
+
 def test_nairobi_estates_are_exposed():
     with TestClient(app) as client:
         payload = client.get("/v1/estates").json()

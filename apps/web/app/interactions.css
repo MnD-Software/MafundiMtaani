@@ -106,6 +106,7 @@
 .campaign-editor{display:flex;flex-direction:column;gap:9px}.campaign-editor input,.campaign-editor select{border:1px solid var(--line);border-radius:11px;padding:12px;background:#fff}.campaign-editor .button{margin-top:5px}.compliance-list article button{border:1px solid var(--line);background:#fff;border-radius:9px;padding:7px 10px;font-size:8px;font-weight:800}.growth-grid article>a{display:block;margin-top:7px;color:var(--green);font-size:8px;font-weight:800}
 .plan-checkout{display:grid!important;grid-template-columns:1fr auto;gap:6px;margin-top:10px}.plan-checkout input{min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:8px}
 .evidence-row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:9px}.evidence-row strong{text-transform:capitalize}.evidence-row span{color:var(--muted)}
+.google-signin{background:#fff!important;color:#111!important;border-color:#c9cec7!important;box-shadow:0 8px 24px rgba(20,28,23,.07)}.google-signin>span{font-size:17px;font-weight:900;color:#4285f4}
 
 @media(max-width:1050px){
   .services-section .category-grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 2px 16px;scrollbar-width:none}
