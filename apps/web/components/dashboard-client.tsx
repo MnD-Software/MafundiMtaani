@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Bell,
@@ -107,6 +107,7 @@ export function DashboardClient({
     void refresh();
   }, []);
   const artisanMode = user?.role === "artisan";
+  const greeting = new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 18 ? "Good afternoon" : "Good evening";
   const nav = [
     ["overview", "Overview", LayoutDashboard],
     ["jobs", artisanMode ? "Job requests" : "My jobs", BriefcaseBusiness],
@@ -162,7 +163,7 @@ export function DashboardClient({
             <span>Private {artisanMode ? "artisan" : "client"} workspace</span>
             <h1>
               {section === "overview"
-                ? `Welcome${user?.name ? `, ${user.name}` : ""}.`
+                ? `${greeting}${user?.name ? `, ${user.name.split(" ")[0]}` : ""}.`
                 : nav.find(([id]) => id === section)?.[1] || "Account profile"}
             </h1>
           </div>
@@ -240,6 +241,7 @@ export function DashboardClient({
                 </div>
               </div>
             )}
+            <PersonalizedInsights jobs={jobs} metrics={metrics} artisanMode={artisanMode} name={user?.name||""}/>
             <RoleChart metrics={metrics} />
             <GrowthTools />
             <JobList jobs={jobs} />
@@ -638,6 +640,26 @@ function SchedulePanel() {
       {notice && <small>{notice}</small>}
     </section>
   );
+}
+
+function PersonalizedInsights({jobs,metrics,artisanMode,name}:{jobs:Job[];metrics:DashboardMetrics;artisanMode:boolean;name:string}){
+  const days=Array.from({length:7},(_,index)=>{const date=new Date();date.setHours(0,0,0,0);date.setDate(date.getDate()-(6-index));return date});
+  const activity=days.map(day=>jobs.filter(job=>new Date(job.created_at).toDateString()===day.toDateString()).length);
+  const cash=days.map(day=>metrics.recent_transactions.filter(item=>new Date(item.created_at).toDateString()===day.toDateString()).reduce((sum,item)=>sum+(artisanMode?item.net:item.gross),0));
+  const completed=jobs.filter(job=>job.status==="completed").length;
+  const completion=jobs.length?Math.round(completed/jobs.length*100):0;
+  const maxActivity=Math.max(...activity,1);const maxCash=Math.max(...cash,1);
+  const activityPoints=activity.map((value,index)=>`${index*50},${74-value/maxActivity*58}`).join(" ");
+  const cashPoints=cash.map((value,index)=>`${index*50},${74-value/maxCash*58}`).join(" ");
+  const first=name.split(" ")[0]||"Your";
+  return <section className="personal-insights">
+    <div className="insight-heading"><div><span className="kicker">Personalised for {first}</span><h2>{artisanMode?"Your business at a glance":"Your home-care activity"}</h2></div><p>{artisanMode?"Earnings, demand and completion are calculated from your approved jobs only.":"Only your bookings and completed payments are included."}</p></div>
+    <div className="insight-grid">
+      <article className="trend-card"><div><span>7-day job activity</span><strong>{activity.reduce((sum,value)=>sum+value,0)}</strong></div><svg viewBox="0 0 300 86" role="img" aria-label="Jobs created over the last seven days"><path d="M0 74H300" className="chart-axis"/><polyline points={activityPoints} className="chart-area-line"/>{activity.map((value,index)=><circle key={index} cx={index*50} cy={74-value/maxActivity*58} r="3"/>)}</svg><footer>{days.map(day=><span key={day.toISOString()}>{day.toLocaleDateString("en-KE",{weekday:"narrow"})}</span>)}</footer></article>
+      <article className="trend-card finance"><div><span>{artisanMode?"7-day net earnings":"7-day completed spend"}</span><strong>KSh {cash.reduce((sum,value)=>sum+value,0).toLocaleString()}</strong></div><svg viewBox="0 0 300 86" role="img" aria-label="Financial activity over the last seven days"><path d="M0 74H300" className="chart-axis"/><polyline points={cashPoints} className="chart-area-line"/>{cash.map((value,index)=><circle key={index} cx={index*50} cy={74-value/maxCash*58} r="3"/>)}</svg><small>{cash.some(Boolean)?"Provider-confirmed transactions":"No completed transactions in this period"}</small></article>
+      <article className="completion-card"><div className="completion-ring" style={{"--completion":`${completion*3.6}deg`} as CSSProperties}><span>{completion}%</span></div><div><span>{artisanMode?"Completion strength":"Jobs completed"}</span><strong>{completed} of {jobs.length}</strong><small>{jobs.length?completion>=80?"Strong follow-through across your jobs.":"Keep active work moving through the protected job room.":"Your progress chart begins with your first booking."}</small></div></article>
+    </div>
+  </section>
 }
 
 function RoleChart({ metrics }: { metrics: DashboardMetrics }) {

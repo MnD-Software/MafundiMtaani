@@ -96,6 +96,10 @@ export function HomeClient() {
     <>
       <main>
         <div className={`search-dock ${searchDocked ? "visible" : ""}`}>
+          <nav className="dock-navigation" aria-label="Sticky marketplace navigation">
+            <Link href="/artisans">Browse</Link>
+            <Link href="/map">Map</Link>
+          </nav>
           <form onSubmit={submitSearch}>
             <label><Search size={17} /><input value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder="What needs fixing?" aria-label="Search service" /></label>
             <label><MapPin size={17} /><select value={area} onChange={(event) => setArea(event.target.value)} aria-label="Select estate">{!nairobiEstates.includes(area)&&<option>{area}</option>}{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></label>
