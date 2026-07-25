@@ -262,6 +262,8 @@ body{background:#fff;color:#0a0c0a}
 .site-header nav{justify-self:center;align-items:center}
 .site-header .header-live-location{justify-self:end}
 .site-header .header-actions{justify-self:end;white-space:nowrap}
+.location-compact{display:none}
+:where(#services,#professionals,#coverage,#how-it-works){scroll-margin-top:96px}
 .header-live-location small{font-size:8px}.header-live-location strong{font-size:10px}
 .hero{align-items:center}.hero-copy{width:100%}.hero-marketplace{width:100%}
 
@@ -286,7 +288,7 @@ body{background:#fff;color:#0a0c0a}
   .site-header .brand{min-width:0;font-size:17px}.site-header .brand>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .site-header .brand-mark{width:36px;height:36px;flex:none}
   .site-header .header-live-location{position:static;z-index:auto;min-width:0;width:auto;max-width:84px;height:40px;margin:0;padding:6px 8px;border-radius:12px;box-shadow:none;background:#f5f8f5}
-  .site-header .header-live-location small{display:none}.site-header .header-live-location strong{max-width:55px;font-size:8px}.site-header .header-live-location svg{width:15px;flex:none}
+  .site-header .header-live-location small,.site-header .location-full{display:none}.site-header .location-compact{display:inline}.site-header .header-live-location strong{display:block;max-width:55px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.site-header .header-live-location svg{width:15px;flex:none}
   .mobile-menu-button{width:40px;height:40px}
   .site-header nav{inset:72px 0 0!important;height:calc(100dvh - 72px)}
   .hero{padding-top:52px!important;padding-bottom:58px!important;gap:28px}

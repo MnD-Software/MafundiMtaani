@@ -32,7 +32,13 @@ export function AppHeader() {
     </nav>
     <button className={`header-live-location ${live.state==="live"?"active":""}`} type="button" onClick={live.start} aria-label="Use my live location">
       <Navigation size={15}/>
-      <span><small>{live.state==="live"?"Your live area":"Find artisans near"}</small><strong>{live.state==="locating"?"Locating…":live.area||"Use my location"}</strong></span>
+      <span>
+        <small>{live.state==="live"?"Your live area":"Find artisans near"}</small>
+        <strong>
+          <span className="location-full">{live.state==="locating"?"Locating…":live.area||"Use my location"}</span>
+          <span className="location-compact">{live.state==="locating"?"Locating…":live.state==="live"?(live.area||"Live area"):"Near me"}</span>
+        </strong>
+      </span>
     </button>
     <div className="header-actions">{!role ? <><Link className="text-action" href="/login">{sw?"Ingia":"Sign in"}</Link><Link className="text-action" href="/register">{sw?"Jisajili":"Sign up"}</Link></>:<Link className="header-account" href={role==="artisan"?"/artisan/dashboard":(["admin","support"].includes(role)?"/admin":"/client/dashboard")}>{user?.avatar_url?<img src={user.avatar_url} alt=""/>:<span>{user?.name?.split(" ").map(part=>part[0]).join("").slice(0,2)}</span>}<strong>{sw?"Akaunti":"Account"}</strong></Link>} {(!role||["client","estate_manager"].includes(role))&&<Link className="button button-dark button-small" href="/post-job">{sw?"Weka kazi":"Post a job"}</Link>}</div>
     <button className={`mobile-menu-button${open ? " open" : ""}`} onClick={() => setOpen(!open)} aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open}><span/><span/></button>
