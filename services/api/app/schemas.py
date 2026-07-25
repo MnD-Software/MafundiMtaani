@@ -59,6 +59,8 @@ class JobCreate(BaseModel):
     description: str = Field(min_length=10, max_length=4000)
     area: str = Field(min_length=2, max_length=100)
     urgency: str = "this_week"
+    scheduled_for: datetime | None = None
+    preferred_artisan_id: str | None = None
     budget_min: float = Field(default=0, ge=0)
     budget_max: float = Field(default=0, ge=0)
 

@@ -63,3 +63,15 @@ python -m pytest services/api/test_api.py -q
 npm.cmd --prefix apps/web run build
 ./scripts/sanity-check.ps1 -WebBase http://127.0.0.1:3000 -ApiBase http://127.0.0.1:8010
 ```
+
+## Operations
+
+Uploads are normalized and compressed before they enter protected database storage. The storage contract is provider-neutral, so object storage can replace the database implementation without changing marketplace URLs.
+
+Create a PostgreSQL backup with `./scripts/backup-database.ps1`. Restore only after confirming the target:
+
+```powershell
+./scripts/restore-database.ps1 -BackupFile .\backups\mafundi-YYYYMMDD-HHMMSS.dump -ConfirmRestore
+```
+
+The ERPNext adapter uses the transactional `integration_outbox`. Marketplace writes complete first; an administrator can then send pending events through `/v1/admin/integrations/erpnext/sync` without coupling user requests to ERPNext availability.

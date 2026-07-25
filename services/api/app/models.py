@@ -121,12 +121,14 @@ class Job(Base):
     description: Mapped[str] = mapped_column(Text)
     area: Mapped[str] = mapped_column(String(100), index=True)
     urgency: Mapped[str] = mapped_column(String(30), default="this_week")
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     budget_min: Mapped[float] = mapped_column(Float, default=0)
     budget_max: Mapped[float] = mapped_column(Float, default=0)
     status: Mapped[JobStatus] = mapped_column(SqlEnum(JobStatus), default=JobStatus.open)
     assigned_artisan_id: Mapped[str | None] = mapped_column(ForeignKey("artisans.id"), nullable=True)
+    preferred_artisan_id: Mapped[str | None] = mapped_column(ForeignKey("artisans.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    assigned_artisan: Mapped[Artisan | None] = relationship()
+    assigned_artisan: Mapped[Artisan | None] = relationship(foreign_keys=[assigned_artisan_id])
 
 
 class JobEvent(Base):

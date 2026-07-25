@@ -23,6 +23,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
+from .image_storage import optimize_upload
 from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, AuthSession, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, InquiryMessage, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, NotificationPreference, OrganizationMember, PasskeyChallenge, PasskeyCredential, PaymentMethod, PaymentStatus, PaymentTransaction, PortfolioItem, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SavedSearch, SOSAlert, StoredFile, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
@@ -328,9 +329,11 @@ async def upload_private_file(
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "Files must be 5 MB or smaller")
     safe_name = (file.filename or "upload").replace("\\", "_").replace("/", "_")[:240]
-    item = StoredFile(owner_id=user.id, filename=safe_name, content_type=file.content_type, category=category[:40], size_bytes=len(content), content=content)
+    original_size = len(content)
+    content, normalized_type, safe_name = optimize_upload(content, file.content_type or "application/octet-stream", safe_name)
+    item = StoredFile(owner_id=user.id, filename=safe_name, content_type=normalized_type, category=category[:40], size_bytes=len(content), content=content)
     db.add(item); db.flush(); audit(db, user.id, "file.uploaded", "stored_file", item.id, {"category": item.category, "size": item.size_bytes}); db.commit(); db.refresh(item)
-    return {"id": item.id, "filename": item.filename, "content_type": item.content_type, "size_bytes": item.size_bytes, "url": f"/api/marketplace/uploads/{item.id}"}
+    return {"id": item.id, "filename": item.filename, "content_type": item.content_type, "size_bytes": item.size_bytes, "original_size_bytes": original_size, "optimized": item.size_bytes < original_size, "url": f"/api/marketplace/uploads/{item.id}"}
 
 
 @app.get("/v1/uploads/{file_id}")
@@ -413,11 +416,20 @@ def create_job(data: JobCreate, db: Session = Depends(get_db), user: User = Depe
         raise HTTPException(422, "Mafundi currently serves supported Nairobi neighbourhoods only.")
     if data.budget_max and data.budget_min > data.budget_max:
         raise HTTPException(422, "Maximum budget must be greater than minimum budget.")
+    if data.urgency == "scheduled" and not data.scheduled_for:
+        raise HTTPException(422, "Choose a date and time for a scheduled job.")
+    if data.scheduled_for and data.scheduled_for <= datetime.now(timezone.utc):
+        raise HTTPException(422, "Scheduled work must be in the future.")
+    preferred = db.get(Artisan, data.preferred_artisan_id) if data.preferred_artisan_id else None
+    if data.preferred_artisan_id and (not preferred or not preferred.verified):
+        raise HTTPException(422, "The requested artisan is not available.")
     reference = f"MM-{1000 + (db.scalar(select(func.count(Job.id))) or 0) + 1}"
     job = Job(reference=reference, client_user_id=user.id, **data.model_dump())
     db.add(job)
     db.flush()
     db.add(JobEvent(job_id=job.id, event_type="job.created", actor_id=user.id, payload={"reference": reference}))
+    if preferred:
+        db.add(Notification(user_id=preferred.user_id,title="Direct job request",body=f"{user.name} requested a quote for {data.title} in {data.area}."))
     recent_jobs = db.scalar(select(func.count(Job.id)).where(Job.client_user_id == user.id, Job.created_at >= datetime.now(timezone.utc) - timedelta(minutes=10))) or 0
     if data.budget_max >= 1_000_000 or recent_jobs >= 5:
         db.add(RiskSignal(user_id=user.id, job_id=job.id, signal_type="unusual_job_velocity" if recent_jobs >= 5 else "high_value_job", severity="high", score=85, details={"recent_jobs":recent_jobs,"budget_max":data.budget_max}))
@@ -1077,6 +1089,14 @@ def add_favorite(artisan_id: str, db: Session = Depends(get_db), user: User = De
     if not favorite:
         favorite = Favorite(user_id=user.id, artisan_id=artisan_id); db.add(favorite); db.commit(); db.refresh(favorite)
     return {"id":favorite.id,"artisan_id":favorite.artisan_id}
+
+
+@app.delete("/v1/favorites/{artisan_id}", status_code=204)
+def remove_favorite(artisan_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.client, UserRole.estate_manager))) -> Response:
+    favorite = db.scalar(select(Favorite).where(Favorite.user_id == user.id, Favorite.artisan_id == artisan_id))
+    if favorite:
+        db.delete(favorite); db.commit()
+    return Response(status_code=204)
 
 
 @app.get("/v1/availability")

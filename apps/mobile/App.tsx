@@ -254,7 +254,7 @@ function Marketplace({
         <Text style={styles.pill}>{user.role.toUpperCase()}</Text>
       </View>
       <Animated.View style={[styles.content, { opacity: fade }]}>
-        {tab === "explore" && <Explore token={token} />}{" "}
+        {tab === "explore" && <Explore token={token} canSave={user.role!=="artisan"} />}{" "}
         {tab === "jobs" && <Jobs token={token} user={user} />}{" "}
         {tab === "post" && <PostJob token={token} />}{" "}
         {tab === "map" && <Coverage />}{" "}
@@ -277,16 +277,23 @@ function Marketplace({
   );
 }
 
-function Explore({ token }: { token: string }) {
+function Explore({ token,canSave }: { token: string;canSave:boolean }) {
   const [items, setItems] = useState<Artisan[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [favorites,setFavorites]=useState<Set<string>>(new Set());
   const { width } = useWindowDimensions();
   useEffect(() => {
     void request("/artisans?available=true", token)
       .then(setItems)
       .finally(() => setLoading(false));
-  }, [token]);
+    if(canSave)void request("/favorites",token).then((rows:Array<{artisan:{id:string}}>)=>setFavorites(new Set(rows.map(row=>row.artisan.id)))).catch(()=>undefined);
+  }, [token,canSave]);
+  const toggleFavorite=async(id:string)=>{
+    const active=favorites.has(id);
+    await request(`/favorites/${id}`,token,{method:active?"DELETE":"POST"});
+    setFavorites(current=>{const next=new Set(current);active?next.delete(id):next.add(id);return next});
+  };
   const visible = useMemo(
     () =>
       items.filter((item) =>
@@ -319,6 +326,7 @@ function Explore({ token }: { token: string }) {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <View style={[styles.card, { width: Math.min(width * 0.76, 320) }]}>
+              {canSave?<Pressable accessibilityLabel={favorites.has(item.id)?"Remove saved artisan":"Save artisan"} onPress={()=>void toggleFavorite(item.id)} style={styles.mobileFavorite}><Text style={styles.mobileFavoriteText}>{favorites.has(item.id)?"♥":"♡"}</Text></Pressable>:null}
               <View
                 style={[styles.avatar, item.rating >= 4.8 && styles.topAvatar]}
               >
@@ -848,6 +856,7 @@ const styles = StyleSheet.create({
   error: { color: "#9c3434", marginTop: 10 },
   notice: { color: "#147d64", marginTop: 14, fontWeight: "700" },
   card: {
+    position: "relative",
     borderWidth: 1,
     borderColor: "#e4e8e2",
     borderRadius: 20,
@@ -855,6 +864,8 @@ const styles = StyleSheet.create({
     marginRight: 12,
     marginBottom: 12,
   },
+  mobileFavorite:{position:"absolute",zIndex:3,top:12,right:12,width:40,height:40,borderRadius:20,alignItems:"center",justifyContent:"center",backgroundColor:"#ffffff",shadowColor:"#000",shadowOpacity:.1,shadowRadius:8},
+  mobileFavoriteText:{fontSize:22,color:"#101310"},
   avatar: {
     height: 170,
     borderRadius: 15,

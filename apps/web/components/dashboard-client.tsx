@@ -8,6 +8,7 @@ import {
   Check,
   CircleDollarSign,
   Clock3,
+  Heart,
   LayoutDashboard,
   KeyRound,
   LogOut,
@@ -113,6 +114,7 @@ export function DashboardClient({
     ["notifications", "Notifications", Bell],
     ["earnings", artisanMode ? "Earnings" : "Payments", CircleDollarSign],
     ["care", artisanMode ? "Support" : "Property care", MapPin],
+    ["favorites", artisanMode ? "" : "Saved artisans", Heart],
     ["reviews", "Reviews", Star],
     ["safety", "Safety & privacy", ShieldCheck],
     ["security", "Sign-in & security", KeyRound],
@@ -131,7 +133,7 @@ export function DashboardClient({
         </Link>
         <nav>
           <Link href="/"><MapPin/>Explore marketplace</Link>
-          {nav.map(([id, label, Icon]) => (
+          {nav.filter(([,label])=>label).map(([id, label, Icon]) => (
             <button
               onClick={() => setSection(id)}
               className={section === id ? "active" : ""}
@@ -274,6 +276,7 @@ export function DashboardClient({
           </section>
         )}
         {section === "notifications" && <NotificationCenter />}
+        {section === "favorites" && !artisanMode && <FavoritesPanel />}
         {section === "earnings" && (
           <section className="dash-panel-page">
             <span className="kicker">
@@ -363,6 +366,19 @@ export function DashboardClient({
       </section>
     </main>
   );
+}
+
+function FavoritesPanel(){
+  type FavoriteRow={id:string;artisan:{id:string;name:string;trade:string;area:string;rating:number}};
+  const[items,setItems]=useState<FavoriteRow[]>([]);
+  const[loading,setLoading]=useState(true);
+  const load=async()=>{const response=await fetch("/api/marketplace/favorites");if(response.ok)setItems(await response.json());setLoading(false)};
+  useEffect(()=>{void load()},[]);
+  const remove=async(id:string)=>{await fetch(`/api/marketplace/favorites/${id}`,{method:"DELETE"});void load()};
+  return <section className="dash-panel-page"><span className="kicker">Your trusted shortlist</span><h2>Saved artisans</h2><p className="panel-lead">Return to professionals you trust, request another quote, or review their latest profile.</p>
+    {items.map(row=><article className="favorite-row" key={row.id}><div><span className="identity-badge">{row.artisan.name.split(" ").map(part=>part[0]).join("").slice(0,2)}</span><span><strong>{row.artisan.name}</strong><small>{row.artisan.trade} · {row.artisan.area} · {row.artisan.rating||"New"} stars</small></span></div><div><Link className="button button-outline" href={`/artisan/${row.artisan.id}`}>Profile</Link><Link className="button button-dark" href={`/post-job?artisan=${row.artisan.id}`}>Book again</Link><button aria-label={`Remove ${row.artisan.name}`} onClick={()=>void remove(row.artisan.id)}><Heart fill="currentColor"/></button></div></article>)}
+    {!loading&&!items.length&&<EmptyPanel title="No saved artisans yet" text="Use the heart on any artisan card to build your shortlist."/>}
+  </section>
 }
 
 function NotificationCenter() {

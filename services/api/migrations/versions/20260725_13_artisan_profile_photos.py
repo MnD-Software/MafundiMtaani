@@ -13,18 +13,23 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("artisans", sa.Column("avatar_url", sa.String(length=500), nullable=False, server_default=""))
-    op.add_column("artisans", sa.Column("years_experience", sa.Integer(), nullable=False, server_default="0"))
-    op.create_table(
-        "inquiry_messages",
-        sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("inquiry_id", sa.String(length=36), sa.ForeignKey("artisan_inquiries.id"), nullable=False),
-        sa.Column("sender_id", sa.String(length=36), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("body", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-    )
-    op.create_index("ix_inquiry_messages_inquiry_id", "inquiry_messages", ["inquiry_id"])
-    op.create_index("ix_inquiry_messages_sender_id", "inquiry_messages", ["sender_id"])
+    inspector = sa.inspect(op.get_bind())
+    columns = {item["name"] for item in inspector.get_columns("artisans")}
+    if "avatar_url" not in columns:
+        op.add_column("artisans", sa.Column("avatar_url", sa.String(length=500), nullable=False, server_default=""))
+    if "years_experience" not in columns:
+        op.add_column("artisans", sa.Column("years_experience", sa.Integer(), nullable=False, server_default="0"))
+    if "inquiry_messages" not in inspector.get_table_names():
+        op.create_table(
+            "inquiry_messages",
+            sa.Column("id", sa.String(length=36), primary_key=True),
+            sa.Column("inquiry_id", sa.String(length=36), sa.ForeignKey("artisan_inquiries.id"), nullable=False),
+            sa.Column("sender_id", sa.String(length=36), sa.ForeignKey("users.id"), nullable=False),
+            sa.Column("body", sa.Text(), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        )
+        op.create_index("ix_inquiry_messages_inquiry_id", "inquiry_messages", ["inquiry_id"])
+        op.create_index("ix_inquiry_messages_sender_id", "inquiry_messages", ["sender_id"])
 
 
 def downgrade():

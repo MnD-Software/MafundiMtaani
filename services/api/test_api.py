@@ -68,6 +68,9 @@ def test_job_creation_requires_client_and_is_private():
         assert client.post("/v1/jobs", json=payload).status_code == 401
         created = client.post("/v1/jobs", headers={"Authorization":f"Bearer {first}"}, json=payload)
         assert created.status_code == 201
+        scheduled={**payload,"title":"Scheduled plumbing visit","urgency":"scheduled","scheduled_for":(datetime.now(timezone.utc)+timedelta(days=2)).isoformat()}
+        assert client.post("/v1/jobs",headers={"Authorization":f"Bearer {first}"},json=scheduled).status_code==201
+        assert client.post("/v1/jobs",headers={"Authorization":f"Bearer {first}"},json={**scheduled,"scheduled_for":None}).status_code==422
         job_id = created.json()["id"]
         assert client.get(f"/v1/jobs/{job_id}", headers={"Authorization":f"Bearer {second}"}).status_code == 403
         assert client.get(f"/v1/jobs/{job_id}", headers={"Authorization":f"Bearer {first}"}).status_code == 200
@@ -141,6 +144,14 @@ def test_artisan_application_and_admin_approval():
         ranked = client.get("/v1/artisans?area=Donholm&min_experience=4")
         assert ranked.status_code == 200
         assert ranked.json()[0]["years_experience"] == 4
+        client_token=register(client,"favorite-client@test.local")
+        favorite_headers={"Authorization":f"Bearer {client_token}"}
+        artisan_id=ranked.json()[0]["id"]
+        assert client.post(f"/v1/favorites/{artisan_id}",headers=favorite_headers).status_code==201
+        assert client.get("/v1/favorites",headers=favorite_headers).json()[0]["artisan"]["id"]==artisan_id
+        assert client.delete(f"/v1/favorites/{artisan_id}",headers=favorite_headers).status_code==204
+        assert client.get("/v1/favorites",headers=favorite_headers).json()==[]
+        assert client.post(f"/v1/favorites/{artisan_id}",headers={"Authorization":f"Bearer {artisan_token}"}).status_code==403
         avatar = client.post("/v1/uploads", headers={"Authorization":f"Bearer {artisan_token}"}, data={"category":"avatar"}, files={"file":("profile.png", b"\x89PNG\r\nprofile-test", "image/png")})
         assert avatar.status_code == 201
         published = client.put("/v1/artisans/me/avatar", headers={"Authorization":f"Bearer {artisan_token}"}, json={"file_id":avatar.json()["id"]})
