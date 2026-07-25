@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     mpesa_passkey: str = ""
     mpesa_callback_url: str = ""
     mpesa_base_url: str = "https://sandbox.safaricom.co.ke"
+    mpesa_callback_secret: str = ""
     google_maps_key: str = ""
     whatsapp_token: str = ""
     whatsapp_phone_number_id: str = ""
@@ -30,7 +31,9 @@ class Settings(BaseSettings):
     web_push_private_key: str = ""
     platform_fee_rate: float = 0.10
     tax_rate: float = 0.0
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="MAFUNDI_")
+    # Ignore retired bootstrap-only variables that may still exist in a host's
+    # environment; production users are always created through the audited CLI.
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="MAFUNDI_", extra="ignore")
 
     def model_post_init(self, __context: object) -> None:
         if self.environment == "production" and self.jwt_secret == "development-only-change-me":

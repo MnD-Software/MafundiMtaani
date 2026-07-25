@@ -3,8 +3,11 @@ import base64
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 import httpx
+import logging
 import smtplib
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+import time
+from uuid import uuid4
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -14,7 +17,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, Invoice, Job, JobEvent, JobMessage, JobMilestone, JobStatus, MilestoneStatus, Notification, PaymentStatus, PaymentTransaction, Promotion, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, User, UserRole
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanInquiry, AuditLog, Campaign, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, Invoice, Job, JobEvent, JobMessage, JobMilestone, JobStatus, MilestoneStatus, Notification, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, User, UserRole
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -50,11 +53,30 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title=settings.app_name, version="2.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+logger=logging.getLogger("mafundi.api")
+
+
+@app.middleware("http")
+async def request_observability(request:Request,call_next):
+    request_id=request.headers.get("x-request-id") or str(uuid4());started=time.perf_counter()
+    try: response=await call_next(request)
+    except Exception:
+        logger.exception("request_failed",extra={"request_id":request_id,"path":request.url.path});raise
+    response.headers["X-Request-ID"]=request_id
+    response.headers["Server-Timing"]=f"app;dur={(time.perf_counter()-started)*1000:.1f}"
+    logger.info("request_complete",extra={"request_id":request_id,"method":request.method,"path":request.url.path,"status":response.status_code})
+    return response
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "service": "marketplace-api", "version": "2.1.0"}
+
+
+@app.get("/health/ready")
+def readiness(db:Session=Depends(get_db)) -> dict:
+    db.execute(select(1))
+    return {"status":"ready","database":"connected"}
 
 
 @app.post("/v1/auth/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
@@ -250,14 +272,40 @@ class AvailabilityCreate(BaseModel):
     active: bool = True
 
 
+class ArtisanProfileUpdate(BaseModel):
+    bio: str = Field(default="", max_length=4000)
+    skills: list[str] = Field(default_factory=list, max_length=30)
+    area: str = Field(min_length=2, max_length=100)
+    available: bool = False
+
+
 class CheckoutCreate(BaseModel):
     job_id: str
     phone: str = Field(min_length=10, max_length=15)
     amount: float = Field(gt=0)
+    promotion_code: str = Field(default="",max_length=40)
 
 
 def user_artisan(db: Session, user: User) -> Artisan | None:
     return db.scalar(select(Artisan).where(Artisan.user_id == user.id))
+
+
+@app.get("/v1/artisans/me")
+def get_my_artisan_profile(db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))) -> dict:
+    artisan=user_artisan(db,user)
+    if not artisan: raise HTTPException(404,"Approved artisan profile not found")
+    return {"id":artisan.id,"name":artisan.name,"trade":artisan.trade,"area":artisan.area,"bio":artisan.bio,"skills":artisan.skills,"available":artisan.available,"rating":artisan.rating,"completed_jobs":artisan.completed_jobs}
+
+
+@app.patch("/v1/artisans/me")
+def update_my_artisan_profile(data: ArtisanProfileUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))) -> dict:
+    artisan=user_artisan(db,user)
+    if not artisan: raise HTTPException(404,"Approved artisan profile not found")
+    if data.area not in NAIROBI_AREAS: raise HTTPException(422,"Select a supported service area")
+    artisan.bio=data.bio;artisan.skills=[skill.strip() for skill in data.skills if skill.strip()][:30];artisan.area=data.area;artisan.available=data.available
+    audit(db,user.id,"artisan.profile_updated","artisan",artisan.id,{"area":artisan.area,"available":artisan.available})
+    db.commit();db.refresh(artisan)
+    return {"id":artisan.id,"bio":artisan.bio,"skills":artisan.skills,"area":artisan.area,"available":artisan.available}
 
 
 def require_job_access(job: Job, db: Session, user: User) -> None:
@@ -508,6 +556,14 @@ async def mpesa_checkout(data: CheckoutCreate, db: Session = Depends(get_db), us
         raise HTTPException(404, "Job not found")
     if not all([settings.mpesa_consumer_key, settings.mpesa_consumer_secret, settings.mpesa_shortcode, settings.mpesa_passkey, settings.mpesa_callback_url]):
         raise HTTPException(503, "M-Pesa is not configured")
+    payable=data.amount;promotion=None
+    if data.promotion_code:
+        now=datetime.now(timezone.utc)
+        promotion=db.scalar(select(Promotion).where(func.upper(Promotion.code)==data.promotion_code.upper(),Promotion.active.is_(True),Promotion.starts_at<=now,or_(Promotion.ends_at.is_(None),Promotion.ends_at>=now)))
+        if not promotion or (promotion.usage_limit and promotion.uses>=promotion.usage_limit): raise HTTPException(422,"Promotion is unavailable")
+        discount=payable*promotion.discount_percent/100
+        if promotion.max_discount: discount=min(discount,promotion.max_discount)
+        payable=max(round(payable-discount,2),1)
     phone = data.phone.replace("+", "")
     if phone.startswith("0"):
         phone = f"254{phone[1:]}"
@@ -519,20 +575,23 @@ async def mpesa_checkout(data: CheckoutCreate, db: Session = Depends(get_db), us
             raise HTTPException(502, "M-Pesa authentication failed")
         response = await client.post(f"{settings.mpesa_base_url}/mpesa/stkpush/v1/processrequest", headers={"Authorization":f"Bearer {auth.json()['access_token']}"}, json={
             "BusinessShortCode":settings.mpesa_shortcode,"Password":password,"Timestamp":timestamp,"TransactionType":"CustomerPayBillOnline",
-            "Amount":round(data.amount),"PartyA":phone,"PartyB":settings.mpesa_shortcode,"PhoneNumber":phone,"CallBackURL":settings.mpesa_callback_url,
+            "Amount":round(payable),"PartyA":phone,"PartyB":settings.mpesa_shortcode,"PhoneNumber":phone,"CallBackURL":settings.mpesa_callback_url,
             "AccountReference":job.reference,"TransactionDesc":f"Mafundi job {job.reference}",
         })
     if response.status_code != 200:
         raise HTTPException(502, "M-Pesa checkout request failed")
     payload = response.json()
-    fee = round(data.amount * settings.platform_fee_rate, 2)
-    transaction = PaymentTransaction(job_id=job.id, client_user_id=user.id, artisan_id=job.assigned_artisan_id, provider="mpesa", provider_reference=payload["CheckoutRequestID"], amount=data.amount, platform_fee=fee, artisan_net=data.amount-fee, status=PaymentStatus.pending)
+    fee = round(payable * settings.platform_fee_rate, 2)
+    transaction = PaymentTransaction(job_id=job.id, client_user_id=user.id, artisan_id=job.assigned_artisan_id, provider="mpesa", provider_reference=payload["CheckoutRequestID"], amount=payable, platform_fee=fee, artisan_net=payable-fee, status=PaymentStatus.pending)
+    if promotion: promotion.uses+=1
     db.add(transaction); db.commit()
     return {"checkout_request_id":payload["CheckoutRequestID"],"status":"pending","message":"Confirm the M-Pesa prompt on your phone."}
 
 
 @app.post("/v1/payments/mpesa/callback")
-def mpesa_callback(payload: dict, db: Session = Depends(get_db)) -> dict:
+def mpesa_callback(payload: dict, request:Request, callback_secret:str="",db: Session = Depends(get_db)) -> dict:
+    supplied=callback_secret or request.headers.get("x-callback-secret","")
+    if settings.mpesa_callback_secret and supplied!=settings.mpesa_callback_secret: raise HTTPException(401,"Invalid callback secret")
     callback = payload.get("Body",{}).get("stkCallback",{})
     reference = callback.get("CheckoutRequestID","")
     transaction = db.scalar(select(PaymentTransaction).where(PaymentTransaction.provider_reference == reference))
@@ -570,6 +629,108 @@ class DispatchCreate(BaseModel):
     title: str = Field(min_length=2, max_length=180)
     body: str = Field(min_length=2, max_length=2000)
     channels: list[str] = Field(default_factory=lambda:["in_app"])
+
+
+class PaymentMethodCreate(BaseModel):
+    method_type: str = Field(pattern="^(mpesa|card|cash|wallet)$")
+    provider: str = Field(min_length=2, max_length=40)
+    provider_token: str = Field(default="", max_length=500)
+    label: str = Field(min_length=2, max_length=80)
+    last_four: str = Field(default="", pattern=r"^\d{0,4}$")
+    is_default: bool = False
+
+
+class InquiryCreate(BaseModel):
+    artisan_id: str
+    message: str = Field(min_length=10,max_length=4000)
+    phone: str = Field(min_length=7,max_length=30)
+
+
+class CampaignCreate(BaseModel):
+    slug: str = Field(min_length=3, max_length=80, pattern=r"^[a-z0-9-]+$")
+    name: str = Field(min_length=2, max_length=120)
+    headline: str = Field(min_length=3, max_length=180)
+    message: str = Field(min_length=3, max_length=2000)
+    theme: str = Field(default="celebration", pattern="^(celebration|christmas|new-year|valentine|easter|eid|halloween|kenya|launch)$")
+    offer_code: str = Field(default="", max_length=40)
+    starts_at: datetime
+    ends_at: datetime
+
+
+def audit(db: Session, actor_id: str | None, action: str, resource_type: str, resource_id: str = "", metadata: dict | None = None) -> None:
+    db.add(AuditLog(actor_id=actor_id, action=action, resource_type=resource_type, resource_id=resource_id, metadata_json=metadata or {}))
+
+
+def automatic_campaign(now: datetime) -> dict | None:
+    month, day = now.month, now.day
+    rules = [
+        ((12,18),(12,27),{"slug":"christmas","name":"Christmas","headline":"Thank you for building Nairobi with us.","message":"Book early for holiday repairs and give yourself more time for what matters.","theme":"christmas","offer_code":""}),
+        ((12,28),(1,5),{"slug":"new-year","name":"New Year","headline":"A fresh start for every home.","message":"Start the year with trusted help and neighbourhood professionals.","theme":"new-year","offer_code":""}),
+        ((2,10),(2,16),{"slug":"valentine","name":"Valentine season","headline":"Care for the spaces you love.","message":"Refresh, repair and prepare your home with verified local artisans.","theme":"valentine","offer_code":""}),
+        ((10,25),(11,1),{"slug":"halloween","name":"Halloween","headline":"No scary surprises in your repairs.","message":"Get transparent quotes and protected work from verified professionals.","theme":"halloween","offer_code":""}),
+        ((5,28),(6,2),{"slug":"madaraka","name":"Madaraka Day","headline":"Built by Kenyan hands.","message":"Celebrating the skilled people who keep our neighbourhoods moving.","theme":"kenya","offer_code":""}),
+        ((10,17),(10,22),{"slug":"mashujaa","name":"Mashujaa Day","headline":"Celebrating everyday neighbourhood heroes.","message":"Thank you to every artisan and client building stronger communities.","theme":"kenya","offer_code":""}),
+        ((12,9),(12,14),{"slug":"jamhuri","name":"Jamhuri Day","headline":"Made for Nairobi. Built for Kenya.","message":"Reliable local work, transparent progress and stronger neighbourhoods.","theme":"kenya","offer_code":""}),
+    ]
+    current = month * 100 + day
+    for start, end, campaign in rules:
+        lower, upper = start[0]*100+start[1], end[0]*100+end[1]
+        if (lower <= upper and lower <= current <= upper) or (lower > upper and (current >= lower or current <= upper)):
+            return campaign
+    return None
+
+
+@app.get("/v1/campaigns/active")
+def active_campaign(db: Session = Depends(get_db)) -> dict | None:
+    now=datetime.now(timezone.utc)
+    item=db.scalar(select(Campaign).where(Campaign.active.is_(True),Campaign.starts_at<=now,Campaign.ends_at>=now).order_by(Campaign.starts_at.desc()))
+    if item:
+        return {"slug":item.slug,"name":item.name,"headline":item.headline,"message":item.message,"theme":item.theme,"offer_code":item.offer_code,"source":"operations"}
+    campaign=automatic_campaign(now)
+    return {**campaign,"source":"calendar"} if campaign else None
+
+
+@app.post("/v1/admin/campaigns", status_code=201)
+def create_campaign(data: CampaignCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.admin))) -> dict:
+    if data.ends_at <= data.starts_at: raise HTTPException(422,"Campaign end must follow its start")
+    item=Campaign(**data.model_dump());db.add(item);db.flush();audit(db,user.id,"campaign.created","campaign",item.id,{"slug":item.slug});db.commit();db.refresh(item)
+    return {"id":item.id,"slug":item.slug,"active":item.active}
+
+
+@app.get("/v1/payment-methods")
+def list_payment_methods(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    rows=db.scalars(select(PaymentMethod).where(PaymentMethod.user_id==user.id,PaymentMethod.active.is_(True)).order_by(PaymentMethod.is_default.desc(),PaymentMethod.created_at)).all()
+    return [{"id":row.id,"method_type":row.method_type,"provider":row.provider,"label":row.label,"last_four":row.last_four,"is_default":row.is_default} for row in rows]
+
+
+@app.post("/v1/inquiries",status_code=201)
+def create_inquiry(data:InquiryCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
+    artisan=db.get(Artisan,data.artisan_id)
+    if not artisan or not artisan.verified: raise HTTPException(404,"Verified artisan not found")
+    item=ArtisanInquiry(client_user_id=user.id,**data.model_dump());db.add(item);db.add(Notification(user_id=artisan.user_id,title="New client introduction",body="A client sent a secure introduction. Open your dashboard to respond."));db.flush();audit(db,user.id,"inquiry.created","artisan_inquiry",item.id,{"artisan_id":artisan.id});db.commit();db.refresh(item)
+    return {"id":item.id,"status":item.status}
+
+
+@app.post("/v1/payment-methods", status_code=201)
+def add_payment_method(data: PaymentMethodCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    if data.method_type=="card" and not data.provider_token: raise HTTPException(422,"Cards must be tokenized by the payment provider")
+    if data.is_default:
+        for row in db.scalars(select(PaymentMethod).where(PaymentMethod.user_id==user.id)): row.is_default=False
+    item=PaymentMethod(user_id=user.id,**data.model_dump());db.add(item);db.flush();audit(db,user.id,"payment_method.added","payment_method",item.id,{"type":item.method_type,"provider":item.provider});db.commit();db.refresh(item)
+    return {"id":item.id,"method_type":item.method_type,"label":item.label,"last_four":item.last_four,"is_default":item.is_default}
+
+
+@app.delete("/v1/payment-methods/{method_id}", status_code=204)
+def remove_payment_method(method_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    item=db.get(PaymentMethod,method_id)
+    if not item or item.user_id!=user.id: raise HTTPException(404,"Payment method not found")
+    item.active=False;audit(db,user.id,"payment_method.removed","payment_method",item.id);db.commit()
+
+
+@app.get("/v1/admin/audit-logs")
+def list_audit_logs(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support)), limit:int=Query(100,ge=1,le=500)) -> list[dict]:
+    rows=db.scalars(select(AuditLog).order_by(AuditLog.occurred_at.desc()).limit(limit)).all()
+    return [{"id":row.id,"actor_id":row.actor_id,"action":row.action,"resource_type":row.resource_type,"resource_id":row.resource_id,"metadata":row.metadata_json,"occurred_at":row.occurred_at} for row in rows]
 
 
 @app.get("/v1/referrals/me")

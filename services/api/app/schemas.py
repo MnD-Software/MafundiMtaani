@@ -42,6 +42,8 @@ class ArtisanOut(BaseModel):
     completed_jobs: int
     verified: bool
     available: bool
+    latitude: float | None
+    longitude: float | None
     model_config = {"from_attributes": True}
 
 

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 TEST_DB = Path("test_mafundi.db")
@@ -150,3 +151,11 @@ def test_growth_billing_devices_and_risk_controls():
         signals = client.get("/v1/admin/risk-signals", headers={"Authorization":f"Bearer {admin_token}"})
         assert signals.status_code == 200
         assert any(item["signal_type"] == "high_value_job" for item in signals.json())
+        method = client.post("/v1/payment-methods", headers={"Authorization":f"Bearer {client_token}"}, json={"method_type":"mpesa","provider":"safaricom","label":"M-Pesa · 0001","last_four":"0001","is_default":True})
+        assert method.status_code == 201
+        assert client.get("/v1/payment-methods", headers={"Authorization":f"Bearer {client_token}"}).json()[0]["is_default"] is True
+        now=datetime.now(timezone.utc)
+        campaign=client.post("/v1/admin/campaigns",headers={"Authorization":f"Bearer {admin_token}"},json={"slug":"test-launch","name":"Launch","headline":"Welcome to Mafundi","message":"Thank you for joining us.","theme":"launch","starts_at":(now-timedelta(hours=1)).isoformat(),"ends_at":(now+timedelta(hours=1)).isoformat()})
+        assert campaign.status_code == 201
+        assert client.get("/v1/campaigns/active").json()["slug"] == "test-launch"
+        assert client.get("/v1/admin/audit-logs",headers={"Authorization":f"Bearer {admin_token}"}).status_code == 200

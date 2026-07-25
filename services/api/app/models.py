@@ -312,6 +312,57 @@ class DocumentVerification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class PaymentMethod(Base):
+    __tablename__ = "payment_methods"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    method_type: Mapped[str] = mapped_column(String(30), index=True)
+    provider: Mapped[str] = mapped_column(String(40))
+    provider_token: Mapped[str] = mapped_column(String(500), default="")
+    label: Mapped[str] = mapped_column(String(80))
+    last_four: Mapped[str] = mapped_column(String(4), default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Campaign(Base):
+    __tablename__ = "campaigns"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    headline: Mapped[str] = mapped_column(String(180))
+    message: Mapped[str] = mapped_column(Text)
+    theme: Mapped[str] = mapped_column(String(30), default="celebration")
+    offer_code: Mapped[str] = mapped_column(String(40), default="")
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    actor_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(100), index=True)
+    resource_type: Mapped[str] = mapped_column(String(80), index=True)
+    resource_id: Mapped[str] = mapped_column(String(80), default="")
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ArtisanInquiry(Base):
+    __tablename__ = "artisan_inquiries"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    client_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    artisan_id: Mapped[str] = mapped_column(ForeignKey("artisans.id"), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    phone: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(24), default="sent", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ApplicationStatus(str, Enum):
     pending = "pending"
     approved = "approved"

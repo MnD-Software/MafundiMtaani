@@ -11,5 +11,14 @@
 /* Production-safe responsive baseline. No retired artisan photography is loaded. */
 html,body{min-width:320px;max-width:100%;overflow-x:clip}
 img,svg{max-width:100%}
+.live-dot,.status-pulse{box-shadow:none!important}
+:where(a,button,input,select,textarea):focus-visible{outline:3px solid rgba(20,125,100,.34);outline-offset:3px}
+button,a{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+@supports not (backdrop-filter:blur(1px)){.site-header,.mobile-app-nav,.availability-card,.rating-card{background:#fff!important}}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
+}
+@media(prefers-contrast:more){:root{--muted:#42463f;--line:#b9bdb5}.button-outline,input,select,textarea{border-width:2px!important}}
 .hero-photo{background:linear-gradient(145deg,#174d40 0%,#0f352d 62%,#0a2923 100%)}
 @media(max-width:420px){.hero h1{font-size:clamp(38px,12vw,48px)}.site-header{padding-inline:16px}.header-actions{gap:8px}.button-small{padding:10px 13px}.search-box{margin-top:26px}.section-heading{gap:16px}.dashboard-main{padding-inline:12px}}

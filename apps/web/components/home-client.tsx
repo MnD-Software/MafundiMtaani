@@ -39,7 +39,7 @@ export function HomeClient() {
         const data = await response.json();
         if (response.ok) setArtisans(data.map((item: { id:string; name:string; trade:string; area:string; rating:number; completed_jobs:number; verified:boolean; skills:string[] }, index: number) => ({
           id:item.id, name:item.name, initials:item.name.split(" ").map((part) => part[0]).join("").slice(0,2), trade:item.trade, area:item.area,
-          rating:item.rating, reviews:0, jobs:item.completed_jobs, eta:"Available now", price:"Request a quote", color:["#174f43","#69512e","#3c4f70","#6b3d51"][index%4], verified:item.verified, skills:item.skills
+          rating:item.rating, reviews:0, jobs:item.completed_jobs, eta:"Available now", price:"Request a quote", color:["#174f43","#69512e","#3c4f70","#6b3d51"][index%4], verified:item.verified, featured:item.rating>=4.8&&item.completed_jobs>=10, skills:item.skills
         })));
       } catch (error) { if ((error as Error).name !== "AbortError") setArtisans([]); }
       finally { setSearching(false); }
@@ -140,7 +140,7 @@ export function HomeClient() {
         <section className="section artisans-section" id="artisans">
           <div className="section-heading"><div><span className="kicker">Top professionals</span><h2>Recommended near {area}</h2></div><div className="nearby"><LocateFixed size={16} /> Live availability</div></div>
           <div className="artisan-grid">
-            {visible.map((artisan) => <Link href={`/artisan/${artisan.id}`} className="artisan-card" key={artisan.id}>
+            {visible.map((artisan) => <Link href={`/artisan/${artisan.id}`} className={`artisan-card${artisan.featured ? " top-professional" : ""}`} key={artisan.id}>
               <div className="artisan-photo artisan-solid" style={{ background: artisan.color }}><span className="artisan-initials">{artisan.initials}</span><div className="artisan-watermark">{artisan.trade}</div>{artisan.featured && <span className="top-badge">Top pro</span>}<span className="eta"><Clock3 size={13} /> {artisan.eta} away</span></div>
               <div className="artisan-body">
                 <div className="artisan-title"><div><h3>{artisan.name} {artisan.verified && <BadgeCheck size={17} fill="#147d64" />}</h3><p>{artisan.trade} · {artisan.area}</p></div><span className="artisan-rating"><Star size={14} fill="currentColor" /> {artisan.rating}</span></div>
@@ -187,7 +187,7 @@ export function HomeClient() {
           <div className="footer-column"><strong>For artisans</strong><Link href="/register">Join Mafundi</Link><Link href="/login">Artisan sign in</Link><Link href="/dashboard">Your dashboard</Link></div>
           <div className="footer-column footer-contact"><strong>Talk to us</strong><a href="mailto:info@mafundimtaani.co.ke"><Mail size={15} />info@mafundimtaani.co.ke</a><a href="tel:+254720898678"><Phone size={15} />+254 720 898678</a><span>Nairobi, Kenya</span></div>
         </div>
-        <div className="footer-bottom"><span>© 2026 Mafundi Mtaani</span><span>Built for Nairobi&apos;s neighbourhoods.</span></div>
+        <div className="footer-bottom"><span>© 2026 Mafundi Mtaani</span><nav><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><Link href="/refunds">Refunds</Link><Link href="/accessibility">Accessibility</Link></nav><span>Built for Nairobi&apos;s neighbourhoods.</span></div>
       </footer>
     </>
   );
