@@ -38,7 +38,7 @@
 @supports(padding:max(0px)){
   @media(max-width:760px){.mobile-app-nav{bottom:max(9px,env(safe-area-inset-bottom))!important}.dashboard-main,.ops-main{padding-bottom:max(120px,calc(92px + env(safe-area-inset-bottom)))!important}}
 }
-@supports(-webkit-touch-callout:none){.mobile-app-nav{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:rgba(255,255,255,.985)!important}.mobile-app-nav a{min-height:48px}}
+@supports(-webkit-touch-callout:none){.mobile-app-nav{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:rgba(255,255,255,.985)!important}.mobile-app-nav a{min-height:48px}.mobile-app-nav a,.mobile-app-nav a:visited,.mobile-app-nav svg{color:#111!important;stroke:#111!important;-webkit-text-fill-color:#111!important}.mobile-app-nav a.primary svg{color:#fff!important;stroke:#fff!important;-webkit-text-fill-color:#fff!important}}
 
 /* Dense marketplace discovery: compact Airbnb-style rails, docked search and Uber-like map sheet. */
 .live-dot,.status-pulse,.system-healthy i{display:none!important;box-shadow:none!important}
@@ -106,7 +106,7 @@
 .campaign-editor{display:flex;flex-direction:column;gap:9px}.campaign-editor input,.campaign-editor select{border:1px solid var(--line);border-radius:11px;padding:12px;background:#fff}.campaign-editor .button{margin-top:5px}.compliance-list article button{border:1px solid var(--line);background:#fff;border-radius:9px;padding:7px 10px;font-size:8px;font-weight:800}.growth-grid article>a{display:block;margin-top:7px;color:var(--green);font-size:8px;font-weight:800}
 .plan-checkout{display:grid!important;grid-template-columns:1fr auto;gap:6px;margin-top:10px}.plan-checkout input{min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:8px}
 .evidence-row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:9px}.evidence-row strong{text-transform:capitalize}.evidence-row span{color:var(--muted)}
-.google-signin{background:#fff!important;color:#111!important;border-color:#c9cec7!important;box-shadow:0 8px 24px rgba(20,28,23,.07)}.google-signin>span{font-size:17px;font-weight:900;color:#4285f4}
+.google-signin{background:#fff!important;color:#111!important;border-color:#c9cec7!important;box-shadow:0 8px 24px rgba(20,28,23,.07)}.google-signin svg{flex:none}.header-account{display:flex;align-items:center;gap:8px;font-size:11px}.header-account img,.header-account>span,.account-avatar img{width:34px;height:34px;border-radius:50%;object-fit:cover}.header-account>span{display:grid;place-items:center;background:#e4f1ea;color:#104c3e;font-weight:900}.account-avatar{overflow:hidden;padding:0!important}
 
 @media(max-width:1050px){
   .services-section .category-grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 2px 16px;scrollbar-width:none}

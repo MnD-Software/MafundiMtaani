@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   MapPin,
   MessageSquare,
+  ShieldCheck,
   Star,
   UserRound,
 } from "lucide-react";
@@ -33,6 +34,7 @@ type User = {
   role: string;
   email?: string;
   phone?: string;
+  avatar_url?: string;
 } | null;
 type DashboardMetrics = {
   role: string;
@@ -92,6 +94,7 @@ export function DashboardClient({
     ["earnings", artisanMode ? "Earnings" : "Payments", CircleDollarSign],
     ["care", artisanMode ? "Support" : "Property care", MapPin],
     ["reviews", "Reviews", Star],
+    ["safety", "Safety & privacy", ShieldCheck],
   ] as const;
   const completed = jobs.filter((job) => job.status === "completed").length;
   const active = jobs.filter((job) =>
@@ -106,6 +109,7 @@ export function DashboardClient({
           <small>{artisanMode ? "PRO" : "CLIENT"}</small>
         </Link>
         <nav>
+          <Link href="/"><MapPin/>Explore marketplace</Link>
           {nav.map(([id, label, Icon]) => (
             <button
               onClick={() => setSection(id)}
@@ -149,8 +153,8 @@ export function DashboardClient({
               <Bell size={19} />
               {jobs.length > 0 && <i />}
             </button>
-            <span className="identity-badge">
-              {user?.name
+            <span className="identity-badge account-avatar">
+              {user?.avatar_url?<img src={user.avatar_url} alt=""/>:user?.name
                 ?.split(" ")
                 .map((part) => part[0])
                 .join("")
@@ -290,6 +294,7 @@ export function DashboardClient({
             text="Only reviews connected to completed jobs are published."
           />
         )}
+        {section === "safety" && <SafetyAndPrivacy />}
         {section === "care" && <CareAndSupport artisanMode={artisanMode}/>}
         {section === "schedule" && <SchedulePanel />}
         {section === "profile" && (
@@ -302,6 +307,74 @@ export function DashboardClient({
       </section>
     </main>
   );
+}
+
+function SafetyAndPrivacy() {
+  type Contact = { id: string; name: string; phone: string; relationship: string };
+  type Consent = { purpose: string; granted: boolean };
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [consents, setConsents] = useState<Consent[]>([]);
+  const [notice, setNotice] = useState("");
+  const load = async () => {
+    const [contactsResponse, consentsResponse] = await Promise.all([
+      fetch("/api/marketplace/safety/trusted-contacts"),
+      fetch("/api/marketplace/privacy/consents"),
+    ]);
+    if (contactsResponse.ok) setContacts(await contactsResponse.json());
+    if (consentsResponse.ok) setConsents(await consentsResponse.json());
+  };
+  useEffect(() => { void load(); }, []);
+  const addContact = async () => {
+    const name = window.prompt("Trusted contact name");
+    const phone = window.prompt("Phone number, including country code");
+    if (!name || !phone) return;
+    const relationship = window.prompt("Relationship (optional)") || "";
+    const response = await fetch("/api/marketplace/safety/trusted-contacts", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, phone, relationship }),
+    });
+    setNotice(response.ok ? "Trusted contact saved." : (await response.json()).detail);
+    void load();
+  };
+  const setConsent = async (purpose: string, granted: boolean) => {
+    await fetch("/api/marketplace/privacy/consents", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ purpose, granted }),
+    });
+    void load();
+  };
+  const download = async () => {
+    const response = await fetch("/api/marketplace/privacy/export");
+    if (!response.ok) return setNotice("Your export could not be prepared.");
+    const blob = new Blob([JSON.stringify(await response.json(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob); const link = document.createElement("a");
+    link.href = url; link.download = "mafundi-mtaani-account-data.json"; link.click(); URL.revokeObjectURL(url);
+  };
+  const sos = () => navigator.geolocation?.getCurrentPosition(
+    async ({ coords }) => {
+      const response = await fetch("/api/marketplace/safety/sos", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latitude: coords.latitude, longitude: coords.longitude }),
+      });
+      setNotice(response.ok ? "Safety alert recorded with your location." : "Could not record the alert.");
+    },
+    async () => {
+      const response = await fetch("/api/marketplace/safety/sos", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      setNotice(response.ok ? "Safety alert recorded without location." : "Could not record the alert.");
+    },
+  );
+  const marketing = consents.find((item) => item.purpose === "marketing")?.granted ?? false;
+  return <section className="dash-panel-page">
+    <span className="kicker">Control and protection</span><h2>Safety & privacy</h2>
+    {notice && <p className="form-success">{notice}</p>}
+    <div className="dashboard-finance-grid">
+      <article><span>Emergency support</span><strong>SOS check-in</strong><p>Record a time-stamped safety event and location when available.</p><button className="button button-dark" onClick={sos}>Send safety alert</button></article>
+      <article><span>Your information</span><strong>Portable by design</strong><p>Download the account, job, contact, and consent data held about you.</p><button className="button" onClick={() => void download()}>Download my data</button></article>
+      <article><span>Communication choice</span><strong>Offers & campaigns</strong><p>Service messages remain available; promotional communication is optional.</p><label><input type="checkbox" checked={marketing} onChange={(event) => void setConsent("marketing", event.target.checked)}/> Allow offers</label></article>
+    </div>
+    <div className="section-heading"><div><span className="kicker">Trusted circle</span><h2>Emergency contacts</h2></div><button onClick={() => void addContact()}>Add contact</button></div>
+    {contacts.length ? contacts.map((contact) => <article className="dashboard-room-link" key={contact.id}><span><strong>{contact.name}</strong><small>{contact.relationship || "Trusted contact"} · {contact.phone}</small></span></article>) : <EmptyPanel title="No trusted contacts" text="Add up to five people you trust."/>}
+  </section>;
 }
 
 function CareAndSupport({artisanMode}:{artisanMode:boolean}){

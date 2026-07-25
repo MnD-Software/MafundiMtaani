@@ -22,6 +22,7 @@ class UserOut(BaseModel):
     email: str
     name: str
     phone: str
+    avatar_url: str
     role: UserRole
     model_config = {"from_attributes": True}
 

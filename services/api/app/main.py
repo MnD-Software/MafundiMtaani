@@ -18,7 +18,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, BusinessOrganization, Campaign, CompletionApproval, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, OrganizationMember, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, SupportTicket, User, UserRole, WarrantyClaim
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, OrganizationMember, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SOSAlert, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -125,8 +125,10 @@ async def google_login(data:GoogleLogin,db:Session=Depends(get_db)):
     user=db.scalar(select(User).where(User.email==email))
     if user and user.role not in {UserRole.client,UserRole.estate_manager}: raise HTTPException(403,"This account cannot use this sign-in page")
     if not user:
-        user=User(email=email,password_hash=hash_password(uuid4().hex+uuid4().hex),name=identity.get("name") or email.split("@")[0],phone="",role=UserRole.client)
+        user=User(email=email,password_hash=hash_password(uuid4().hex+uuid4().hex),name=identity.get("name") or email.split("@")[0],phone="",avatar_url=identity.get("picture",""),role=UserRole.client)
         db.add(user);db.commit();db.refresh(user)
+    elif identity.get("picture") and not user.avatar_url:
+        user.avatar_url=identity["picture"];db.commit();db.refresh(user)
     return {"access_token":create_access_token(user),"user":user}
 
 
@@ -1315,3 +1317,99 @@ def dashboard_metrics(db: Session = Depends(get_db), user: User = Depends(get_cu
         "funds_held": sum(payment.amount for payment in payments if payment.status == PaymentStatus.held),
         "transactions": len(payments),
     }
+
+
+class TrustedContactCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    phone: str = Field(min_length=7, max_length=30)
+    relationship: str = Field(default="", max_length=80)
+
+
+class SOSCreate(BaseModel):
+    job_id: str | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+class ConsentUpdate(BaseModel):
+    purpose: str = Field(min_length=2, max_length=80)
+    granted: bool
+
+
+class AccountDeactivate(BaseModel):
+    confirmation: str
+
+
+@app.get("/v1/safety/trusted-contacts")
+def trusted_contacts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return db.scalars(select(TrustedContact).where(TrustedContact.user_id == user.id).order_by(TrustedContact.name)).all()
+
+
+@app.post("/v1/safety/trusted-contacts", status_code=201)
+def add_trusted_contact(data: TrustedContactCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if (db.scalar(select(func.count(TrustedContact.id)).where(TrustedContact.user_id == user.id)) or 0) >= 5:
+        raise HTTPException(422, "You can save up to five trusted contacts")
+    item = TrustedContact(user_id=user.id, **data.model_dump())
+    db.add(item); db.flush(); audit(db, user.id, "safety.contact_added", "trusted_contact", item.id); db.commit(); db.refresh(item)
+    return item
+
+
+@app.delete("/v1/safety/trusted-contacts/{contact_id}", status_code=204)
+def remove_trusted_contact(contact_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = db.scalar(select(TrustedContact).where(TrustedContact.id == contact_id, TrustedContact.user_id == user.id))
+    if not item:
+        raise HTTPException(404, "Trusted contact not found")
+    audit(db, user.id, "safety.contact_removed", "trusted_contact", item.id); db.delete(item); db.commit()
+    return Response(status_code=204)
+
+
+@app.post("/v1/safety/sos", status_code=201)
+def create_sos(data: SOSCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if data.job_id:
+        job = db.get(Job, data.job_id)
+        artisan_id = db.scalar(select(Artisan.id).where(Artisan.user_id == user.id)) if user.role == UserRole.artisan else None
+        if not job or (job.client_user_id != user.id and job.assigned_artisan_id != artisan_id):
+            raise HTTPException(403, "This job is not available to your account")
+    item = SOSAlert(user_id=user.id, **data.model_dump())
+    db.add(item); db.add(Notification(user_id=user.id, title="Safety alert recorded", body="Your emergency alert was securely recorded. Contact local emergency services if you are in immediate danger."))
+    db.flush(); audit(db, user.id, "safety.sos_created", "sos_alert", item.id, {"job_id": data.job_id}); db.commit(); db.refresh(item)
+    return item
+
+
+@app.get("/v1/privacy/consents")
+def list_consents(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return db.scalars(select(ConsentRecord).where(ConsentRecord.user_id == user.id).order_by(ConsentRecord.purpose)).all()
+
+
+@app.put("/v1/privacy/consents")
+def update_consent(data: ConsentUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    purpose = data.purpose.lower().strip()
+    item = db.scalar(select(ConsentRecord).where(ConsentRecord.user_id == user.id, ConsentRecord.purpose == purpose))
+    if item:
+        item.granted = data.granted; item.updated_at = datetime.now(timezone.utc)
+    else:
+        item = ConsentRecord(user_id=user.id, purpose=purpose, granted=data.granted); db.add(item)
+    db.flush(); audit(db, user.id, "privacy.consent_updated", "consent_record", item.id, {"purpose": purpose, "granted": data.granted}); db.commit(); db.refresh(item)
+    return item
+
+
+@app.get("/v1/privacy/export")
+def privacy_export(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    jobs = db.scalars(select(Job).where(Job.client_user_id == user.id)).all()
+    contacts = db.scalars(select(TrustedContact).where(TrustedContact.user_id == user.id)).all()
+    consents = db.scalars(select(ConsentRecord).where(ConsentRecord.user_id == user.id)).all()
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "account": {"id": user.id, "name": user.name, "email": user.email, "phone": user.phone, "role": user.role.value},
+        "jobs": [{"reference": item.reference, "title": item.title, "status": item.status.value, "area": item.area, "created_at": item.created_at.isoformat()} for item in jobs],
+        "trusted_contacts": [{"name": item.name, "phone": item.phone, "relationship": item.relationship} for item in contacts],
+        "consents": [{"purpose": item.purpose, "granted": item.granted, "updated_at": item.updated_at.isoformat()} for item in consents],
+    }
+
+
+@app.delete("/v1/privacy/account", status_code=204)
+def deactivate_account(data: AccountDeactivate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if data.confirmation != "DELETE MY ACCOUNT":
+        raise HTTPException(422, "Enter DELETE MY ACCOUNT to confirm")
+    audit(db, user.id, "account.deactivated", "user", user.id); user.active = False; db.commit()
+    return Response(status_code=204)

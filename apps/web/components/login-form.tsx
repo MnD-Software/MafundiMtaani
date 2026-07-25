@@ -78,7 +78,7 @@ export function LoginForm({portal="client"}:{portal?:"client"|"artisan"|"operati
           <>
             <div className="auth-divider"><span>or</span></div>
             <a className="button button-outline button-wide google-signin" href="/api/auth/google/start">
-              <span aria-hidden="true">G</span> Continue with Google
+              <GoogleMark/> Continue with Google
             </a>
           </>
         )}
@@ -95,4 +95,8 @@ export function LoginForm({portal="client"}:{portal?:"client"|"artisan"|"operati
       </form>
     </main>
   );
+}
+
+function GoogleMark(){
+  return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.205c0-.64-.057-1.255-.164-1.845H9v3.49h4.844a4.14 4.14 0 0 1-1.797 2.715v2.265h2.91c1.704-1.568 2.683-3.88 2.683-6.625Z"/><path fill="#34A853" d="M9 18c2.43 0 4.468-.806 5.957-2.17l-2.91-2.265c-.806.54-1.835.86-3.047.86-2.344 0-4.328-1.585-5.037-3.715H.955v2.337A9 9 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.963 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.281-1.71V4.953H.955A9 9 0 0 0 0 9c0 1.452.347 2.827.955 4.047l3.008-2.337Z"/><path fill="#EA4335" d="M9 3.575c1.322 0 2.508.455 3.442 1.345l2.581-2.582C13.464.886 11.427 0 9 0A9 9 0 0 0 .955 4.953L3.963 7.29C4.672 5.16 6.656 3.575 9 3.575Z"/></svg>
 }

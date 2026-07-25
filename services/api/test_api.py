@@ -96,6 +96,22 @@ def test_dashboard_metrics_are_role_scoped():
         assert client.get("/v1/dashboard/metrics", headers={"Authorization":f"Bearer {admin_token}"}).status_code == 403
 
 
+def test_safety_and_privacy_are_private_and_persistent():
+    with TestClient(app) as client:
+        token = register(client, "safety-client@test.local")
+        headers = {"Authorization": f"Bearer {token}"}
+        assert client.get("/v1/safety/trusted-contacts").status_code == 401
+        contact = client.post("/v1/safety/trusted-contacts", headers=headers, json={"name":"Jane Doe","phone":"+254720000000","relationship":"Sibling"})
+        assert contact.status_code == 201
+        assert client.get("/v1/safety/trusted-contacts", headers=headers).json()[0]["name"] == "Jane Doe"
+        assert client.post("/v1/safety/sos", headers=headers, json={"latitude":-1.2864,"longitude":36.8172}).status_code == 201
+        assert client.put("/v1/privacy/consents", headers=headers, json={"purpose":"marketing","granted":True}).status_code == 200
+        export = client.get("/v1/privacy/export", headers=headers)
+        assert export.status_code == 200
+        assert export.json()["account"]["email"] == "safety-client@test.local"
+        assert export.json()["consents"][0]["granted"] is True
+
+
 def test_artisan_application_and_admin_approval():
     with TestClient(app) as client:
         artisan_token = register(client, "artisan@test.local", "artisan")
