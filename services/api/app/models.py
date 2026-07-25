@@ -259,6 +259,8 @@ class Subscription(Base):
     monthly_amount: Mapped[float] = mapped_column(Float, default=0)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     renews_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_reference: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True, index=True)
+    phone: Mapped[str] = mapped_column(String(30), default="")
 
 
 class Invoice(Base):

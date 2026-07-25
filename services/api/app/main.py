@@ -9,6 +9,7 @@ import time
 from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -83,9 +84,15 @@ def readiness(db:Session=Depends(get_db)) -> dict:
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
     if data.account_type not in {UserRole.client, UserRole.artisan, UserRole.estate_manager}:
         raise HTTPException(422, "This account type cannot self-register")
+    referral = db.scalar(select(Referral).where(func.upper(Referral.code) == data.referral_code.upper(), Referral.referred_user_id.is_(None))) if data.referral_code else None
+    if data.referral_code and not referral:
+        raise HTTPException(422, "Referral code is invalid")
     user = User(email=data.email.lower().strip(), password_hash=hash_password(data.password), name=data.name, phone=data.phone, role=data.account_type)
     db.add(user)
     try:
+        db.flush()
+        if referral:
+            db.add(Referral(referrer_user_id=referral.referrer_user_id, referred_user_id=user.id, code=f"{referral.code[:15]}-{user.id[:6]}", reward_amount=250, status="qualified"))
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -441,6 +448,11 @@ def update_job_status(job_id: str, next_status: JobStatus, db: Session = Depends
     if next_status not in allowed.get(job.status, set()):
         raise HTTPException(409, "Invalid job status transition")
     job.status = next_status
+    if next_status == JobStatus.completed:
+        referral=db.scalar(select(Referral).where(Referral.referred_user_id==job.client_user_id,Referral.status=="qualified"))
+        if referral:
+            referral.status="rewarded"
+            db.add(Notification(user_id=referral.referrer_user_id,title="Referral reward earned",body=f"KSh {referral.reward_amount:,.0f} was added to your referral rewards."))
     db.add(JobEvent(job_id=job.id, event_type=f"job.{next_status.value}", actor_id=user.id, payload={}))
     db.add(Notification(user_id=job.client_user_id, title="Job status updated", body=f"{job.reference} is now {next_status.value.replace('_',' ')}."))
     db.commit()
@@ -604,6 +616,12 @@ def mpesa_callback(payload: dict, request:Request, callback_secret:str="",db: Se
                 tax = round(transaction.platform_fee * settings.tax_rate, 2)
                 db.add(Invoice(number=f"MM-{datetime.now().year}-{sequence:06d}", transaction_id=transaction.id, client_user_id=transaction.client_user_id, subtotal=transaction.amount, platform_fee=transaction.platform_fee, tax_amount=tax, total=transaction.amount, currency="KES"))
         db.commit()
+    else:
+        subscription=db.scalar(select(Subscription).where(Subscription.provider_reference==reference))
+        if subscription:
+            subscription.status="active" if callback.get("ResultCode")==0 else "payment_failed"
+            if subscription.status=="active": subscription.renews_at=datetime.now(timezone.utc)+timedelta(days=30)
+            db.commit()
     return {"ResultCode":0,"ResultDesc":"Accepted"}
 
 
@@ -657,6 +675,13 @@ class CampaignCreate(BaseModel):
     ends_at: datetime
 
 
+class CampaignUpdate(BaseModel):
+    headline: str | None = Field(default=None, max_length=180)
+    message: str | None = Field(default=None, max_length=2000)
+    offer_code: str | None = Field(default=None, max_length=40)
+    active: bool | None = None
+
+
 def audit(db: Session, actor_id: str | None, action: str, resource_type: str, resource_id: str = "", metadata: dict | None = None) -> None:
     db.add(AuditLog(actor_id=actor_id, action=action, resource_type=resource_type, resource_id=resource_id, metadata_json=metadata or {}))
 
@@ -694,6 +719,22 @@ def active_campaign(db: Session = Depends(get_db)) -> dict | None:
 def create_campaign(data: CampaignCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.admin))) -> dict:
     if data.ends_at <= data.starts_at: raise HTTPException(422,"Campaign end must follow its start")
     item=Campaign(**data.model_dump());db.add(item);db.flush();audit(db,user.id,"campaign.created","campaign",item.id,{"slug":item.slug});db.commit();db.refresh(item)
+    return {"id":item.id,"slug":item.slug,"active":item.active}
+
+
+@app.get("/v1/admin/campaigns")
+def list_campaigns(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> list[dict]:
+    rows=db.scalars(select(Campaign).order_by(Campaign.starts_at.desc())).all()
+    return [{"id":row.id,"slug":row.slug,"name":row.name,"headline":row.headline,"message":row.message,"theme":row.theme,"offer_code":row.offer_code,"starts_at":row.starts_at,"ends_at":row.ends_at,"active":row.active} for row in rows]
+
+
+@app.patch("/v1/admin/campaigns/{campaign_id}")
+def update_campaign(campaign_id:str,data:CampaignUpdate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.admin))) -> dict:
+    item=db.get(Campaign,campaign_id)
+    if not item: raise HTTPException(404,"Campaign not found")
+    changes=data.model_dump(exclude_none=True)
+    for key,value in changes.items(): setattr(item,key,value)
+    audit(db,user.id,"campaign.updated","campaign",item.id,changes);db.commit()
     return {"id":item.id,"slug":item.slug,"active":item.active}
 
 
@@ -782,6 +823,27 @@ def choose_subscription(data: SubscriptionCreate, db: Session = Depends(get_db),
     return {"id":item.id,"plan":item.plan,"status":item.status,"monthly_amount":item.monthly_amount,"payment_required":item.status=="pending"}
 
 
+class SubscriptionCheckout(BaseModel):
+    phone:str=Field(min_length=10,max_length=16)
+
+
+@app.post("/v1/subscriptions/checkout")
+async def subscription_checkout(data:SubscriptionCheckout,db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> dict:
+    item=db.scalar(select(Subscription).where(Subscription.user_id==user.id,Subscription.status=="pending").order_by(Subscription.started_at.desc()))
+    if not item or item.monthly_amount<=0: raise HTTPException(409,"No paid subscription is awaiting payment")
+    if not all([settings.mpesa_consumer_key,settings.mpesa_consumer_secret,settings.mpesa_shortcode,settings.mpesa_passkey,settings.mpesa_callback_url]): raise HTTPException(503,"M-Pesa is not configured")
+    phone=data.phone.replace("+","").replace(" ","")
+    timestamp=datetime.now().strftime("%Y%m%d%H%M%S")
+    password=base64.b64encode(f"{settings.mpesa_shortcode}{settings.mpesa_passkey}{timestamp}".encode()).decode()
+    async with httpx.AsyncClient(timeout=20) as client:
+        auth=await client.get(f"{settings.mpesa_base_url}/oauth/v1/generate?grant_type=client_credentials",auth=(settings.mpesa_consumer_key,settings.mpesa_consumer_secret))
+        if not auth.is_success: raise HTTPException(502,"M-Pesa authentication failed")
+        response=await client.post(f"{settings.mpesa_base_url}/mpesa/stkpush/v1/processrequest",headers={"Authorization":f"Bearer {auth.json()['access_token']}"},json={"BusinessShortCode":settings.mpesa_shortcode,"Password":password,"Timestamp":timestamp,"TransactionType":"CustomerPayBillOnline","Amount":round(item.monthly_amount),"PartyA":phone,"PartyB":settings.mpesa_shortcode,"PhoneNumber":phone,"CallBackURL":settings.mpesa_callback_url,"AccountReference":f"PLAN-{item.plan.upper()}","TransactionDesc":f"Mafundi {item.plan} subscription"})
+    if not response.is_success: raise HTTPException(502,"M-Pesa checkout request failed")
+    item.provider_reference=response.json()["CheckoutRequestID"];item.phone=phone;db.commit()
+    return {"checkout_request_id":item.provider_reference,"status":"pending","message":"Confirm the subscription prompt on your phone."}
+
+
 @app.get("/v1/invoices")
 def list_invoices(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
     query=select(Invoice)
@@ -794,10 +856,59 @@ def list_invoices(db: Session = Depends(get_db), user: User = Depends(get_curren
     return [{"id":row.id,"number":row.number,"subtotal":row.subtotal,"platform_fee":row.platform_fee,"tax_amount":row.tax_amount,"total":row.total,"currency":row.currency,"issued_at":row.issued_at} for row in rows]
 
 
+def simple_pdf(lines:list[str]) -> bytes:
+    escaped=[line.replace("\\","\\\\").replace("(","\\(").replace(")","\\)") for line in lines]
+    stream="BT /F1 12 Tf 52 790 Td 18 TL "+" ".join(f"({line}) Tj T*" for line in escaped)+" ET"
+    objects=["<< /Type /Catalog /Pages 2 0 R >>","<< /Type /Pages /Kids [3 0 R] /Count 1 >>","<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>","<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",f"<< /Length {len(stream.encode())} >>\nstream\n{stream}\nendstream"]
+    pdf=b"%PDF-1.4\n";offsets=[]
+    for index,obj in enumerate(objects,1): offsets.append(len(pdf));pdf+=f"{index} 0 obj\n{obj}\nendobj\n".encode()
+    xref=len(pdf);pdf+=f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n".encode()
+    for offset in offsets: pdf+=f"{offset:010d} 00000 n \n".encode()
+    pdf+=f"trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode()
+    return pdf
+
+
+@app.get("/v1/invoices/{invoice_id}/pdf")
+def invoice_pdf(invoice_id:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> Response:
+    invoice=db.get(Invoice,invoice_id)
+    if not invoice: raise HTTPException(404,"Invoice not found")
+    transaction=db.get(PaymentTransaction,invoice.transaction_id)
+    if user.role in {UserRole.client,UserRole.estate_manager} and invoice.client_user_id!=user.id: raise HTTPException(403,"Not authorized")
+    if user.role==UserRole.artisan:
+        artisan=user_artisan(db,user)
+        if not artisan or not transaction or transaction.artisan_id!=artisan.id: raise HTTPException(403,"Not authorized")
+    lines=["MAFUNDI MTAANI","Tax invoice",f"Invoice: {invoice.number}",f"Issued: {invoice.issued_at.date().isoformat()}",f"Subtotal: KES {invoice.subtotal:,.2f}",f"Platform fee: KES {invoice.platform_fee:,.2f}",f"Tax: KES {invoice.tax_amount:,.2f}",f"Total: KES {invoice.total:,.2f}","info@mafundimtaani.co.ke | +254 720 898678"]
+    return Response(simple_pdf(lines),media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="{invoice.number}.pdf"'})
+
+
 @app.get("/v1/admin/reconciliation")
 def reconciliation(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> dict:
     by_status=db.execute(select(PaymentTransaction.status,func.count(PaymentTransaction.id),func.coalesce(func.sum(PaymentTransaction.amount),0)).group_by(PaymentTransaction.status)).all()
     return {"payments":[{"status":status.value,"count":count,"amount":amount} for status,count,amount in by_status],"invoice_count":db.scalar(select(func.count(Invoice.id))) or 0,"un_invoiced":db.scalar(select(func.count(PaymentTransaction.id)).outerjoin(Invoice,Invoice.transaction_id==PaymentTransaction.id).where(Invoice.id.is_(None),PaymentTransaction.status.in_([PaymentStatus.held,PaymentStatus.completed]))) or 0}
+
+
+@app.post("/v1/admin/reconciliation/run")
+def run_reconciliation(db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.admin,UserRole.support))) -> dict:
+    transactions=db.scalars(select(PaymentTransaction).outerjoin(Invoice,Invoice.transaction_id==PaymentTransaction.id).where(Invoice.id.is_(None),PaymentTransaction.status.in_([PaymentStatus.held,PaymentStatus.completed]))).all()
+    base=db.scalar(select(func.count(Invoice.id))) or 0
+    for index,transaction in enumerate(transactions,1):
+        db.add(Invoice(number=f"MM-{datetime.now().year}-{base+index:06d}",transaction_id=transaction.id,client_user_id=transaction.client_user_id,subtotal=transaction.amount,platform_fee=transaction.platform_fee,tax_amount=round(transaction.platform_fee*settings.tax_rate,2),total=transaction.amount,currency="KES"))
+    audit(db,user.id,"reconciliation.completed","payment",metadata={"invoices_created":len(transactions)});db.commit()
+    return {"invoices_created":len(transactions)}
+
+
+class RefundCreate(BaseModel):
+    reason:str=Field(min_length=5,max_length=300)
+
+
+@app.post("/v1/admin/payments/{transaction_id}/refund")
+def record_refund(transaction_id:str,data:RefundCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.admin))) -> dict:
+    transaction=db.get(PaymentTransaction,transaction_id)
+    if not transaction: raise HTTPException(404,"Payment not found")
+    if transaction.status not in {PaymentStatus.held,PaymentStatus.completed}: raise HTTPException(409,"Payment cannot be refunded")
+    transaction.status=PaymentStatus.refunded
+    audit(db,user.id,"payment.refund_recorded","payment",transaction.id,{"reason":data.reason,"provider_reference":transaction.provider_reference});db.commit()
+    return {"id":transaction.id,"status":transaction.status.value,"provider_action_required":transaction.provider=="mpesa"}
 
 
 @app.post("/v1/devices", status_code=201)
@@ -809,7 +920,7 @@ def register_device(data: DeviceCreate, db: Session = Depends(get_db), user: Use
     return {"id":item.id,"platform":item.platform,"active":item.active}
 
 
-async def deliver_notification(user: User, title: str, body: str, channels: list[str]) -> dict:
+async def deliver_notification(db:Session,user: User, title: str, body: str, channels: list[str]) -> dict:
     results={"in_app":"queued"}
     if "email" in channels:
         if settings.smtp_host and user.email:
@@ -828,8 +939,19 @@ async def deliver_notification(user: User, title: str, body: str, channels: list
                 response=await client.post(f"https://graph.facebook.com/v22.0/{settings.whatsapp_phone_number_id}/messages",headers={"Authorization":f"Bearer {settings.whatsapp_token}"},json={"messaging_product":"whatsapp","to":user.phone.replace("+",""),"type":"text","text":{"body":f"{title}\n{body}"}})
             results["whatsapp"]="sent" if response.is_success else "failed"
         else: results["whatsapp"]="not_configured"
-    if "sms" in channels: results["sms"]="not_configured" if not settings.sms_api_key else "queued"
-    if "push" in channels: results["push"]="not_configured" if not settings.web_push_private_key else "queued"
+    if "sms" in channels:
+        if settings.sms_api_key and settings.sms_username and user.phone:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response=await client.post("https://api.africastalking.com/version1/messaging",headers={"apiKey":settings.sms_api_key,"Accept":"application/json"},data={"username":settings.sms_username,"to":user.phone,"message":f"{title}: {body}"})
+            results["sms"]="sent" if response.is_success else "failed"
+        else: results["sms"]="not_configured"
+    if "push" in channels:
+        tokens=db.scalars(select(DeviceToken).where(DeviceToken.user_id==user.id,DeviceToken.active.is_(True),DeviceToken.platform.in_(["android","ios"]))).all()
+        if tokens:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response=await client.post("https://exp.host/--/api/v2/push/send",headers={"Accept":"application/json","Content-Type":"application/json"},json=[{"to":item.token,"title":title,"body":body,"sound":"default"} for item in tokens])
+            results["push"]="sent" if response.is_success else "failed"
+        else: results["push"]="no_active_device"
     return results
 
 
@@ -838,7 +960,7 @@ async def dispatch_notification(data: DispatchCreate, db: Session = Depends(get_
     recipient=db.get(User,data.user_id)
     if not recipient: raise HTTPException(404,"Recipient not found")
     db.add(Notification(user_id=recipient.id,title=data.title,body=data.body,channel=",".join(data.channels)));db.commit()
-    return {"delivery":await deliver_notification(recipient,data.title,data.body,data.channels)}
+    return {"delivery":await deliver_notification(db,recipient,data.title,data.body,data.channels)}
 
 
 @app.get("/v1/admin/risk-signals")
@@ -851,6 +973,35 @@ def list_risk_signals(db: Session = Depends(get_db), _: User = Depends(require_r
 def list_document_verifications(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> list[dict]:
     rows=db.scalars(select(DocumentVerification).order_by(DocumentVerification.created_at.desc())).all()
     return [{"id":row.id,"application_id":row.application_id,"document_type":row.document_type,"status":row.status,"provider":row.provider,"confidence":row.confidence,"expires_at":row.expires_at,"notes":row.notes} for row in rows]
+
+
+class VerificationResult(BaseModel):
+    verification_id:str
+    status:str=Field(pattern="^(pending|verified|rejected|expired)$")
+    provider:str=Field(min_length=2,max_length=80)
+    confidence:float=Field(default=0,ge=0,le=1)
+    notes:str=Field(default="",max_length=1000)
+    expires_at:datetime|None=None
+
+
+@app.post("/v1/webhooks/verification")
+def verification_webhook(data:VerificationResult,request:Request,db:Session=Depends(get_db)) -> dict:
+    supplied=request.headers.get("x-webhook-secret","")
+    if not settings.verification_webhook_secret or supplied!=settings.verification_webhook_secret: raise HTTPException(401,"Invalid webhook secret")
+    item=db.get(DocumentVerification,data.verification_id)
+    if not item: raise HTTPException(404,"Verification not found")
+    item.status=data.status;item.provider=data.provider;item.confidence=data.confidence;item.notes=data.notes;item.expires_at=data.expires_at
+    audit(db,None,"verification.result_received","document_verification",item.id,{"provider":data.provider,"status":data.status});db.commit()
+    return {"id":item.id,"status":item.status}
+
+
+@app.post("/v1/admin/document-verifications/expiry-scan")
+def verification_expiry_scan(db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.admin,UserRole.support))) -> dict:
+    now=datetime.now(timezone.utc)
+    rows=db.scalars(select(DocumentVerification).where(DocumentVerification.expires_at.is_not(None),DocumentVerification.expires_at<now,DocumentVerification.status=="verified")).all()
+    for item in rows: item.status="expired"
+    audit(db,user.id,"verification.expiry_scan","document_verification",metadata={"expired":len(rows)});db.commit()
+    return {"expired":len(rows)}
 
 
 @app.get("/v1/admin/metrics")

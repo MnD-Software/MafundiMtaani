@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     smtp_from: str = "info@mafundimtaani.co.ke"
     web_push_public_key: str = ""
     web_push_private_key: str = ""
+    verification_webhook_secret: str = ""
     platform_fee_rate: float = 0.10
     tax_rate: float = 0.0
     # Ignore retired bootstrap-only variables that may still exist in a host's

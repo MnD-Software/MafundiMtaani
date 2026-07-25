@@ -141,6 +141,8 @@ def test_growth_billing_devices_and_risk_controls():
         referral = client.get("/v1/referrals/me", headers={"Authorization":f"Bearer {client_token}"})
         assert referral.status_code == 200
         assert referral.json()["code"].startswith("MM-")
+        referred=client.post("/v1/auth/register",json={"email":"referred@test.local","password":"TestPassword123!","name":"Referred Client","phone":"+254700000002","account_type":"client","referral_code":referral.json()["code"]})
+        assert referred.status_code==201
         subscription = client.post("/v1/subscriptions", headers={"Authorization":f"Bearer {client_token}"}, json={"plan":"pro"})
         assert subscription.status_code == 200
         assert subscription.json()["payment_required"] is True
@@ -158,4 +160,8 @@ def test_growth_billing_devices_and_risk_controls():
         campaign=client.post("/v1/admin/campaigns",headers={"Authorization":f"Bearer {admin_token}"},json={"slug":"test-launch","name":"Launch","headline":"Welcome to Mafundi","message":"Thank you for joining us.","theme":"launch","starts_at":(now-timedelta(hours=1)).isoformat(),"ends_at":(now+timedelta(hours=1)).isoformat()})
         assert campaign.status_code == 201
         assert client.get("/v1/campaigns/active").json()["slug"] == "test-launch"
+        campaigns=client.get("/v1/admin/campaigns",headers={"Authorization":f"Bearer {admin_token}"})
+        assert campaigns.status_code==200
+        assert client.patch(f"/v1/admin/campaigns/{campaign.json()['id']}",headers={"Authorization":f"Bearer {admin_token}"},json={"active":False}).status_code==200
+        assert client.post("/v1/admin/reconciliation/run",headers={"Authorization":f"Bearer {admin_token}"}).json()["invoices_created"]==0
         assert client.get("/v1/admin/audit-logs",headers={"Authorization":f"Bearer {admin_token}"}).status_code == 200

@@ -9,6 +9,7 @@ class RegisterRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     phone: str = Field(default="", max_length=30)
     account_type: UserRole = UserRole.client
+    referral_code: str = Field(default="", max_length=24)
 
 
 class LoginRequest(BaseModel):
