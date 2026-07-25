@@ -169,3 +169,15 @@ def test_growth_billing_devices_and_risk_controls():
         assert client.patch(f"/v1/admin/campaigns/{campaign.json()['id']}",headers={"Authorization":f"Bearer {admin_token}"},json={"active":False}).status_code==200
         assert client.post("/v1/admin/reconciliation/run",headers={"Authorization":f"Bearer {admin_token}"}).json()["invoices_created"]==0
         assert client.get("/v1/admin/audit-logs",headers={"Authorization":f"Bearer {admin_token}"}).status_code == 200
+
+
+def test_property_care_support_and_sla_workflows():
+    with TestClient(app) as client:
+        token=register(client,"property-owner@test.local")
+        headers={"Authorization":f"Bearer {token}"}
+        property_item=client.post("/v1/properties",headers=headers,json={"name":"Family home","area":"Kilimani","address":"Nairobi","property_type":"home"});assert property_item.status_code==201
+        schedule=client.post("/v1/maintenance-schedules",headers=headers,json={"property_id":property_item.json()["id"],"title":"Quarterly plumbing inspection","trade":"Plumbing","frequency_days":90,"next_due_at":(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()});assert schedule.status_code==201
+        ticket=client.post("/v1/support-tickets",headers=headers,json={"subject":"Need help with a booking","details":"Please help me review the current booking status.","priority":"high"});assert ticket.status_code==201
+        assert client.get("/v1/support-tickets",headers=headers).json()[0]["reference"].startswith("SUP-")
+        admin=create_admin()
+        assert client.get("/v1/support-tickets",headers={"Authorization":f"Bearer {admin}"}).status_code==200

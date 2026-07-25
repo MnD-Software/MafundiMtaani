@@ -18,7 +18,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanInquiry, AuditLog, Campaign, CompletionApproval, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MilestoneStatus, Notification, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, User, UserRole, WarrantyClaim
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, Campaign, CompletionApproval, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, SupportTicket, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -483,6 +483,92 @@ def create_warranty_claim(job_id:str,data:WarrantyCreate,db:Session=Depends(get_
 def list_warranty_claims(db:Session=Depends(get_db),_:User=Depends(require_roles(UserRole.admin,UserRole.support))) -> list[dict]:
     rows=db.scalars(select(WarrantyClaim).order_by(WarrantyClaim.created_at.desc())).all()
     return [{"id":item.id,"job_id":item.job_id,"reason":item.reason,"details":item.details,"status":item.status,"created_at":item.created_at} for item in rows]
+
+
+class PropertyCreate(BaseModel):
+    name:str=Field(min_length=2,max_length=160)
+    area:str=Field(min_length=2,max_length=100)
+    address:str=Field(default="",max_length=300)
+    property_type:str=Field(default="home",pattern="^(home|apartment|estate|office|commercial)$")
+    notes:str=Field(default="",max_length=2000)
+
+
+@app.get("/v1/properties")
+def list_properties(db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> list[dict]:
+    rows=db.scalars(select(Property).where(Property.owner_user_id==user.id).order_by(Property.created_at.desc())).all()
+    return [{"id":item.id,"name":item.name,"area":item.area,"address":item.address,"property_type":item.property_type,"notes":item.notes} for item in rows]
+
+
+@app.post("/v1/properties",status_code=201)
+def create_property(data:PropertyCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
+    if data.area not in NAIROBI_AREAS: raise HTTPException(422,"Choose a supported Nairobi area")
+    item=Property(owner_user_id=user.id,**data.model_dump());db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"name":item.name}
+
+
+class ScheduleCreate(BaseModel):
+    property_id:str
+    title:str=Field(min_length=3,max_length=180)
+    trade:str=Field(min_length=2,max_length=100)
+    frequency_days:int=Field(ge=7,le=730)
+    next_due_at:datetime
+
+
+@app.get("/v1/maintenance-schedules")
+def list_schedules(db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> list[dict]:
+    rows=db.scalars(select(MaintenanceSchedule).where(MaintenanceSchedule.owner_user_id==user.id,MaintenanceSchedule.active.is_(True)).order_by(MaintenanceSchedule.next_due_at)).all()
+    return [{"id":item.id,"property_id":item.property_id,"title":item.title,"trade":item.trade,"frequency_days":item.frequency_days,"next_due_at":item.next_due_at} for item in rows]
+
+
+@app.post("/v1/maintenance-schedules",status_code=201)
+def create_schedule(data:ScheduleCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
+    property_item=db.get(Property,data.property_id)
+    if not property_item or property_item.owner_user_id!=user.id: raise HTTPException(404,"Property not found")
+    item=MaintenanceSchedule(owner_user_id=user.id,**data.model_dump());db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"next_due_at":item.next_due_at}
+
+
+class TicketCreate(BaseModel):
+    subject:str=Field(min_length=4,max_length=180)
+    details:str=Field(min_length=10,max_length=4000)
+    priority:str=Field(default="normal",pattern="^(low|normal|high|urgent)$")
+    job_id:str|None=None
+
+
+@app.post("/v1/support-tickets",status_code=201)
+def create_ticket(data:TicketCreate,db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> dict:
+    hours={"low":72,"normal":24,"high":8,"urgent":2}[data.priority]
+    item=SupportTicket(reference=f"SUP-{uuid4().hex[:8].upper()}",opened_by=user.id,sla_due_at=datetime.now(timezone.utc)+timedelta(hours=hours),**data.model_dump());db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"reference":item.reference,"status":item.status,"sla_due_at":item.sla_due_at}
+
+
+@app.get("/v1/support-tickets")
+def list_tickets(db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> list[dict]:
+    query=select(SupportTicket)
+    if user.role not in {UserRole.admin,UserRole.support}: query=query.where(SupportTicket.opened_by==user.id)
+    rows=db.scalars(query.order_by(SupportTicket.created_at.desc())).all()
+    now=datetime.now(timezone.utc)
+    return [{"id":item.id,"reference":item.reference,"subject":item.subject,"priority":item.priority,"status":item.status,"sla_due_at":item.sla_due_at,"overdue":(item.sla_due_at if item.sla_due_at.tzinfo else item.sla_due_at.replace(tzinfo=timezone.utc))<now and item.status not in {"resolved","closed"}} for item in rows]
+
+
+class EarningCreate(BaseModel):
+    amount:float=Field(gt=0,le=100000)
+    earning_type:str=Field(default="tip",pattern="^(tip|bonus)$")
+
+
+@app.post("/v1/jobs/{job_id}/earnings",status_code=201)
+def create_earning(job_id:str,data:EarningCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
+    job=db.get(Job,job_id)
+    if not job or job.client_user_id!=user.id or job.status!=JobStatus.completed or not job.assigned_artisan_id: raise HTTPException(404,"Eligible completed job not found")
+    item=ArtisanEarning(artisan_id=job.assigned_artisan_id,job_id=job.id,client_user_id=user.id,**data.model_dump());db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"amount":item.amount,"status":item.status,"payment_required":True}
+
+
+@app.get("/v1/artisan/earnings")
+def artisan_earnings(db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.artisan))) -> dict:
+    artisan=user_artisan(db,user)
+    rows=db.scalars(select(ArtisanEarning).where(ArtisanEarning.artisan_id==(artisan.id if artisan else "")).order_by(ArtisanEarning.created_at.desc())).all()
+    return {"total":sum(item.amount for item in rows if item.status=="paid"),"pending":sum(item.amount for item in rows if item.status=="pending"),"items":[{"id":item.id,"type":item.earning_type,"amount":item.amount,"status":item.status} for item in rows]}
 
 
 @app.post("/v1/jobs/{job_id}/messages", status_code=201)

@@ -136,6 +136,57 @@ class WarrantyClaim(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Property(Base):
+    __tablename__ = "properties"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    owner_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    area: Mapped[str] = mapped_column(String(100), index=True)
+    address: Mapped[str] = mapped_column(String(300), default="")
+    property_type: Mapped[str] = mapped_column(String(40), default="home")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MaintenanceSchedule(Base):
+    __tablename__ = "maintenance_schedules"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    property_id: Mapped[str] = mapped_column(ForeignKey("properties.id"), index=True)
+    owner_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    trade: Mapped[str] = mapped_column(String(100), index=True)
+    frequency_days: Mapped[int] = mapped_column(Integer, default=30)
+    next_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    reference: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    opened_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True, index=True)
+    subject: Mapped[str] = mapped_column(String(180))
+    details: Mapped[str] = mapped_column(Text)
+    priority: Mapped[str] = mapped_column(String(20), default="normal", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    sla_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ArtisanEarning(Base):
+    __tablename__ = "artisan_earnings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    artisan_id: Mapped[str] = mapped_column(ForeignKey("artisans.id"), index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    client_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    earning_type: Mapped[str] = mapped_column(String(20), default="tip")
+    amount: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    provider_reference: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class PaymentStatus(str, Enum):
     pending = "pending"
     held = "held"
