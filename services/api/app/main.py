@@ -18,7 +18,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanInquiry, AuditLog, Campaign, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, Invoice, Job, JobEvent, JobMessage, JobMilestone, JobStatus, MilestoneStatus, Notification, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, User, UserRole
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanInquiry, AuditLog, Campaign, CompletionApproval, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MilestoneStatus, Notification, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -251,6 +251,29 @@ class MessageCreate(BaseModel):
     attachment_url: str = Field(default="", max_length=500)
 
 
+class TrackingCreate(BaseModel):
+    latitude:float=Field(ge=-90,le=90)
+    longitude:float=Field(ge=-180,le=180)
+    accuracy_m:float=Field(default=0,ge=0,le=10000)
+    eta_minutes:int=Field(default=0,ge=0,le=1440)
+
+
+class EvidenceCreate(BaseModel):
+    stage:str=Field(pattern="^(before|during|after)$")
+    file_url:str=Field(min_length=8,max_length=500)
+    caption:str=Field(default="",max_length=300)
+
+
+class CompletionCreate(BaseModel):
+    approved:bool=True
+    note:str=Field(default="",max_length=1000)
+
+
+class WarrantyCreate(BaseModel):
+    reason:str=Field(min_length=5,max_length=240)
+    details:str=Field(min_length=10,max_length=3000)
+
+
 class MilestoneCreate(BaseModel):
     title: str = Field(min_length=2, max_length=180)
     amount: float = Field(ge=0)
@@ -399,6 +422,9 @@ def job_room(job_id: str, db: Session = Depends(get_db), user: User = Depends(ge
     milestones = db.scalars(select(JobMilestone).where(JobMilestone.job_id == job.id).order_by(JobMilestone.created_at)).all()
     quotes = db.scalars(select(Quote).where(Quote.job_id == job.id).order_by(Quote.created_at.desc())).all()
     dispute = db.scalar(select(Dispute).where(Dispute.job_id == job.id).order_by(Dispute.created_at.desc()))
+    tracking=db.scalar(select(JobTrackingPing).where(JobTrackingPing.job_id==job.id).order_by(JobTrackingPing.recorded_at.desc()))
+    evidence=db.scalars(select(JobEvidence).where(JobEvidence.job_id==job.id).order_by(JobEvidence.created_at)).all()
+    completion=db.scalar(select(CompletionApproval).where(CompletionApproval.job_id==job.id))
     return {
         "job":{"id":job.id,"reference":job.reference,"title":job.title,"trade":job.trade,"area":job.area,"status":job.status.value,"client_name":job.client_name,"assigned_artisan_id":job.assigned_artisan_id},
         "quotes":[quote_dict(item, db) for item in quotes],
@@ -406,7 +432,57 @@ def job_room(job_id: str, db: Session = Depends(get_db), user: User = Depends(ge
         "milestones":[{"id":item.id,"title":item.title,"amount":item.amount,"status":item.status.value,"due_at":item.due_at} for item in milestones],
         "dispute":{"id":dispute.id,"reason":dispute.reason,"status":dispute.status.value,"resolution":dispute.resolution} if dispute else None,
         "viewer":{"id":user.id,"role":user.role.value},
+        "tracking":{"latitude":tracking.latitude,"longitude":tracking.longitude,"accuracy_m":tracking.accuracy_m,"eta_minutes":tracking.eta_minutes,"recorded_at":tracking.recorded_at} if tracking else None,
+        "evidence":[{"id":item.id,"stage":item.stage,"file_url":item.file_url,"caption":item.caption,"created_at":item.created_at} for item in evidence],
+        "completion":{"approved":completion.approved,"note":completion.note,"approved_at":completion.approved_at} if completion else None,
     }
+
+
+@app.post("/v1/jobs/{job_id}/tracking",status_code=201)
+def update_tracking(job_id:str,data:TrackingCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.artisan))) -> dict:
+    job=db.get(Job,job_id);artisan=user_artisan(db,user)
+    if not job or not artisan or job.assigned_artisan_id!=artisan.id: raise HTTPException(404,"Assigned job not found")
+    if job.status not in {JobStatus.assigned,JobStatus.in_progress}: raise HTTPException(409,"Tracking is only available during an active job")
+    item=JobTrackingPing(job_id=job.id,artisan_id=artisan.id,**data.model_dump());artisan.latitude=data.latitude;artisan.longitude=data.longitude
+    db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"eta_minutes":item.eta_minutes,"recorded_at":item.recorded_at}
+
+
+@app.post("/v1/jobs/{job_id}/evidence",status_code=201)
+def add_evidence(job_id:str,data:EvidenceCreate,db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> dict:
+    job=db.get(Job,job_id)
+    if not job: raise HTTPException(404,"Job not found")
+    require_job_access(job,db,user)
+    if data.stage=="after" and user.role not in {UserRole.artisan,UserRole.admin,UserRole.support}: raise HTTPException(403,"Only the assigned professional can submit completion evidence")
+    item=JobEvidence(job_id=job.id,uploaded_by=user.id,**data.model_dump());db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"stage":item.stage}
+
+
+@app.post("/v1/jobs/{job_id}/completion-approval")
+def approve_completion(job_id:str,data:CompletionCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
+    job=db.get(Job,job_id)
+    if not job or job.client_user_id!=user.id: raise HTTPException(404,"Job not found")
+    if job.status!=JobStatus.completed: raise HTTPException(409,"The artisan must submit the work as completed first")
+    item=db.scalar(select(CompletionApproval).where(CompletionApproval.job_id==job.id)) or CompletionApproval(job_id=job.id,client_user_id=user.id)
+    item.approved=data.approved;item.note=data.note;item.approved_at=datetime.now(timezone.utc) if data.approved else None;db.add(item)
+    db.add(JobEvent(job_id=job.id,event_type="completion.approved" if data.approved else "completion.rejected",actor_id=user.id,payload={"note":data.note}));db.commit()
+    return {"approved":item.approved,"approved_at":item.approved_at}
+
+
+@app.post("/v1/jobs/{job_id}/warranty-claims",status_code=201)
+def create_warranty_claim(job_id:str,data:WarrantyCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
+    job=db.get(Job,job_id)
+    if not job or job.client_user_id!=user.id or job.status!=JobStatus.completed: raise HTTPException(404,"Eligible completed job not found")
+    created=job.created_at if job.created_at.tzinfo else job.created_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc)-created>timedelta(days=90): raise HTTPException(409,"The 90-day workmanship cover has expired")
+    item=WarrantyClaim(job_id=job.id,client_user_id=user.id,**data.model_dump());db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"status":item.status}
+
+
+@app.get("/v1/admin/warranty-claims")
+def list_warranty_claims(db:Session=Depends(get_db),_:User=Depends(require_roles(UserRole.admin,UserRole.support))) -> list[dict]:
+    rows=db.scalars(select(WarrantyClaim).order_by(WarrantyClaim.created_at.desc())).all()
+    return [{"id":item.id,"job_id":item.job_id,"reason":item.reason,"details":item.details,"status":item.status,"created_at":item.created_at} for item in rows]
 
 
 @app.post("/v1/jobs/{job_id}/messages", status_code=201)

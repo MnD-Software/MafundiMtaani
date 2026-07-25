@@ -92,6 +92,50 @@ class JobEvent(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class JobTrackingPing(Base):
+    __tablename__ = "job_tracking_pings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    artisan_id: Mapped[str] = mapped_column(ForeignKey("artisans.id"), index=True)
+    latitude: Mapped[float] = mapped_column(Float)
+    longitude: Mapped[float] = mapped_column(Float)
+    accuracy_m: Mapped[float] = mapped_column(Float, default=0)
+    eta_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class JobEvidence(Base):
+    __tablename__ = "job_evidence"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    uploaded_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    stage: Mapped[str] = mapped_column(String(20), index=True)
+    file_url: Mapped[str] = mapped_column(String(500))
+    caption: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CompletionApproval(Base):
+    __tablename__ = "completion_approvals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), unique=True, index=True)
+    client_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    note: Mapped[str] = mapped_column(Text, default="")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WarrantyClaim(Base):
+    __tablename__ = "warranty_claims"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    client_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    reason: Mapped[str] = mapped_column(String(240))
+    details: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class PaymentStatus(str, Enum):
     pending = "pending"
     held = "held"

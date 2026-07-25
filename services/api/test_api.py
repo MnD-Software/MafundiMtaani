@@ -114,7 +114,11 @@ def test_quote_job_room_tracking_and_verified_review():
         assert client.post(f"/v1/quotes/{quote.json()['id']}/accept", headers={"Authorization":f"Bearer {client_token}"}).status_code == 200
         assert client.post(f"/v1/jobs/{job['id']}/messages", headers={"Authorization":f"Bearer {client_token}"}, json={"body":"Please call on arrival."}).status_code == 201
         assert client.patch(f"/v1/jobs/{job['id']}/status?next_status=in_progress", headers={"Authorization":f"Bearer {artisan_token}"}).status_code == 200
+        assert client.post(f"/v1/jobs/{job['id']}/tracking",headers={"Authorization":f"Bearer {artisan_token}"},json={"latitude":-1.2921,"longitude":36.8219,"accuracy_m":12,"eta_minutes":8}).status_code==201
+        assert client.post(f"/v1/jobs/{job['id']}/evidence",headers={"Authorization":f"Bearer {artisan_token}"},json={"stage":"after","file_url":"https://files.example.test/finished.jpg","caption":"Completed repair"}).status_code==201
         assert client.patch(f"/v1/jobs/{job['id']}/status?next_status=completed", headers={"Authorization":f"Bearer {artisan_token}"}).status_code == 200
+        assert client.post(f"/v1/jobs/{job['id']}/completion-approval",headers={"Authorization":f"Bearer {client_token}"},json={"approved":True,"note":"Work inspected"}).status_code==200
+        assert client.post(f"/v1/jobs/{job['id']}/warranty-claims",headers={"Authorization":f"Bearer {client_token}"},json={"reason":"Follow-up required","details":"The repaired connection needs another inspection."}).status_code==201
         review = client.post(f"/v1/jobs/{job['id']}/reviews", headers={"Authorization":f"Bearer {client_token}"}, json={"rating":5,"comment":"Excellent verified work."})
         assert review.status_code == 201
         assert review.json()["verified"] is True
