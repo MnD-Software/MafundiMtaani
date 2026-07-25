@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 from .config import settings
 from .database import get_db
-from .models import User, UserRole
+from .models import AuthSession, User, UserRole
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -19,9 +19,13 @@ def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode(), password_hash.encode())
 
 
-def create_access_token(user: User) -> str:
+def create_access_token(user: User, db: Session | None = None, user_agent: str = "", ip_address: str = "") -> str:
     expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
-    return jwt.encode({"sub": user.id, "role": user.role.value, "exp": expires}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    payload = {"sub": user.id, "role": user.role.value, "exp": expires}
+    if db is not None:
+        session = AuthSession(user_id=user.id, user_agent=user_agent[:300], ip_address=ip_address[:64])
+        db.add(session); db.flush(); payload["sid"] = session.id
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)) -> User:
@@ -34,6 +38,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     user = db.get(User, payload.get("sub"))
     if not user or not user.active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account unavailable")
+    if payload.get("sid"):
+        session = db.get(AuthSession, payload["sid"])
+        if not session or session.user_id != user.id or session.revoked_at:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session has been signed out")
+        session.last_seen_at = datetime.now(timezone.utc)
+        db.commit()
     return user
 
 

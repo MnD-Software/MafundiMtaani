@@ -18,12 +18,12 @@ async function forward(
   const target = `${apiUrl}/v1/${path.map(encodeURIComponent).join("/")}${source.search}`;
   const body = ["GET", "HEAD"].includes(request.method)
     ? undefined
-    : await request.text();
+    : await request.arrayBuffer();
   const response = await fetch(target, {
     method: request.method,
     headers: {
       Authorization: `Bearer ${token}`,
-      ...(body
+      ...(body?.byteLength
         ? {
             "Content-Type":
               request.headers.get("content-type") || "application/json",

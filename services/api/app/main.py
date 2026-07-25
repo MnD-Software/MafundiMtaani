@@ -3,22 +3,27 @@ import base64
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 import httpx
+import json
 import logging
 import smtplib
 import time
+from urllib.parse import urlparse
 from uuid import uuid4
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from webauthn import generate_authentication_options, generate_registration_options, options_to_json, verify_authentication_response, verify_registration_response
+from webauthn.helpers import parse_authentication_credential_json
+from webauthn.helpers.structs import AuthenticatorSelectionCriteria, ResidentKeyRequirement, UserVerificationRequirement
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, OrganizationMember, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SOSAlert, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, AuthSession, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, OrganizationMember, PasskeyChallenge, PasskeyCredential, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SOSAlert, StoredFile, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -80,8 +85,16 @@ def readiness(db:Session=Depends(get_db)) -> dict:
     return {"status":"ready","database":"connected"}
 
 
+def issue_token(user: User, db: Session, request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    address = forwarded.split(",")[0].strip() or (request.client.host if request.client else "")
+    token = create_access_token(user, db, request.headers.get("user-agent", ""), address)
+    db.commit()
+    return token
+
+
 @app.post("/v1/auth/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
-def register(data: RegisterRequest, db: Session = Depends(get_db)):
+def register(data: RegisterRequest, request: Request, db: Session = Depends(get_db)):
     if data.account_type not in {UserRole.client, UserRole.artisan, UserRole.estate_manager}:
         raise HTTPException(422, "This account type cannot self-register")
     referral = db.scalar(select(Referral).where(func.upper(Referral.code) == data.referral_code.upper(), Referral.referred_user_id.is_(None))) if data.referral_code else None
@@ -98,15 +111,15 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(409, "An account with this email already exists") from exc
     db.refresh(user)
-    return {"access_token": create_access_token(user), "user": user}
+    return {"access_token": issue_token(user, db, request), "user": user}
 
 
 @app.post("/v1/auth/login", response_model=TokenOut)
-def login(data: LoginRequest, db: Session = Depends(get_db)):
+def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.email == data.email.lower().strip()))
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(401, "Incorrect email or password")
-    return {"access_token": create_access_token(user), "user": user}
+    return {"access_token": issue_token(user, db, request), "user": user}
 
 
 class GoogleLogin(BaseModel):
@@ -114,7 +127,7 @@ class GoogleLogin(BaseModel):
 
 
 @app.post("/v1/auth/google",response_model=TokenOut)
-async def google_login(data:GoogleLogin,db:Session=Depends(get_db)):
+async def google_login(data:GoogleLogin,request:Request,db:Session=Depends(get_db)):
     if not settings.google_client_id: raise HTTPException(503,"Google sign-in is not configured")
     async with httpx.AsyncClient(timeout=15) as client:
         response=await client.get("https://oauth2.googleapis.com/tokeninfo",params={"id_token":data.id_token})
@@ -129,12 +142,185 @@ async def google_login(data:GoogleLogin,db:Session=Depends(get_db)):
         db.add(user);db.commit();db.refresh(user)
     elif identity.get("picture") and not user.avatar_url:
         user.avatar_url=identity["picture"];db.commit();db.refresh(user)
-    return {"access_token":create_access_token(user),"user":user}
+    return {"access_token":issue_token(user,db,request),"user":user}
 
 
 @app.get("/v1/auth/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return user
+
+
+def webauthn_context() -> tuple[str, str]:
+    origin = settings.webauthn_origin.rstrip("/") or settings.cors_origin_list[0]
+    rp_id = settings.webauthn_rp_id or (urlparse(origin).hostname or "localhost")
+    return rp_id, origin
+
+
+def credential_key(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
+
+
+class PasskeyComplete(BaseModel):
+    challenge_id: str
+    credential: dict
+    label: str = Field(default="This device", max_length=100)
+    expected_role: str = ""
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+@app.post("/v1/auth/passkeys/register/options")
+def passkey_registration_options(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rp_id, _ = webauthn_context()
+    options = generate_registration_options(
+        rp_id=rp_id,
+        rp_name="Mafundi Mtaani",
+        user_id=user.id.encode(),
+        user_name=user.email,
+        user_display_name=user.name,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        ),
+    )
+    item = PasskeyChallenge(user_id=user.id, challenge=options.challenge, purpose="register", expires_at=datetime.now(timezone.utc) + timedelta(minutes=5))
+    db.add(item); db.commit(); db.refresh(item)
+    return {"challenge_id": item.id, "options": json.loads(options_to_json(options))}
+
+
+@app.post("/v1/auth/passkeys/register/complete", status_code=201)
+def complete_passkey_registration(data: PasskeyComplete, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    challenge = db.scalar(select(PasskeyChallenge).where(PasskeyChallenge.id == data.challenge_id, PasskeyChallenge.user_id == user.id, PasskeyChallenge.purpose == "register"))
+    if not challenge or challenge.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(400, "Passkey setup expired. Please try again.")
+    rp_id, origin = webauthn_context()
+    try:
+        verified = verify_registration_response(credential=data.credential, expected_challenge=challenge.challenge, expected_rp_id=rp_id, expected_origin=origin)
+    except Exception as exc:
+        raise HTTPException(400, "This passkey could not be verified") from exc
+    key = credential_key(verified.credential_id)
+    if db.scalar(select(PasskeyCredential).where(PasskeyCredential.credential_id == key)):
+        raise HTTPException(409, "This passkey is already registered")
+    item = PasskeyCredential(user_id=user.id, credential_id=key, public_key=verified.credential_public_key, sign_count=verified.sign_count, label=data.label.strip() or "This device")
+    db.add(item); db.delete(challenge); db.flush(); audit(db, user.id, "passkey.registered", "passkey", item.id); db.commit(); db.refresh(item)
+    return {"id": item.id, "label": item.label, "created_at": item.created_at}
+
+
+@app.post("/v1/auth/passkeys/login/options")
+def passkey_login_options(db: Session = Depends(get_db)):
+    rp_id, _ = webauthn_context()
+    options = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.PREFERRED)
+    item = PasskeyChallenge(challenge=options.challenge, purpose="login", expires_at=datetime.now(timezone.utc) + timedelta(minutes=5))
+    db.add(item); db.commit(); db.refresh(item)
+    return {"challenge_id": item.id, "options": json.loads(options_to_json(options))}
+
+
+@app.post("/v1/auth/passkeys/login/complete", response_model=TokenOut)
+def complete_passkey_login(data: PasskeyComplete, request: Request, db: Session = Depends(get_db)):
+    challenge = db.scalar(select(PasskeyChallenge).where(PasskeyChallenge.id == data.challenge_id, PasskeyChallenge.purpose == "login"))
+    if not challenge or challenge.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(401, "Passkey sign-in expired")
+    try:
+        parsed = parse_authentication_credential_json(data.credential)
+        stored = db.scalar(select(PasskeyCredential).where(PasskeyCredential.credential_id == credential_key(parsed.raw_id)))
+        if not stored:
+            raise ValueError("unknown credential")
+        rp_id, origin = webauthn_context()
+        verified = verify_authentication_response(credential=parsed, expected_challenge=challenge.challenge, expected_rp_id=rp_id, expected_origin=origin, credential_public_key=stored.public_key, credential_current_sign_count=stored.sign_count)
+    except Exception as exc:
+        raise HTTPException(401, "Passkey sign-in was not accepted") from exc
+    user = db.get(User, stored.user_id)
+    if not user or not user.active:
+        raise HTTPException(401, "Account unavailable")
+    allowed = {"client": {UserRole.client, UserRole.estate_manager}, "artisan": {UserRole.artisan}, "operations": {UserRole.admin, UserRole.support}}
+    if data.expected_role and user.role not in allowed.get(data.expected_role, set()):
+        raise HTTPException(401, "Passkey sign-in was not accepted")
+    stored.sign_count = verified.new_sign_count; stored.last_used_at = datetime.now(timezone.utc); db.delete(challenge)
+    audit(db, user.id, "passkey.used", "passkey", stored.id)
+    return {"access_token": issue_token(user, db, request), "user": user}
+
+
+@app.get("/v1/auth/passkeys")
+def list_passkeys(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = db.scalars(select(PasskeyCredential).where(PasskeyCredential.user_id == user.id).order_by(PasskeyCredential.created_at.desc())).all()
+    return [{"id": item.id, "label": item.label, "created_at": item.created_at, "last_used_at": item.last_used_at} for item in rows]
+
+
+@app.delete("/v1/auth/passkeys/{passkey_id}", status_code=204)
+def delete_passkey(passkey_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = db.scalar(select(PasskeyCredential).where(PasskeyCredential.id == passkey_id, PasskeyCredential.user_id == user.id))
+    if not item:
+        raise HTTPException(404, "Passkey not found")
+    audit(db, user.id, "passkey.removed", "passkey", item.id); db.delete(item); db.commit()
+    return Response(status_code=204)
+
+
+@app.get("/v1/auth/sessions")
+def list_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = db.scalars(select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)).order_by(AuthSession.last_seen_at.desc())).all()
+    return [{"id": item.id, "user_agent": item.user_agent, "ip_address": item.ip_address, "created_at": item.created_at, "last_seen_at": item.last_seen_at} for item in rows]
+
+
+@app.delete("/v1/auth/sessions/{session_id}", status_code=204)
+def revoke_session(session_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = db.scalar(select(AuthSession).where(AuthSession.id == session_id, AuthSession.user_id == user.id))
+    if not item:
+        raise HTTPException(404, "Session not found")
+    item.revoked_at = datetime.now(timezone.utc); audit(db, user.id, "session.revoked", "auth_session", item.id); db.commit()
+    return Response(status_code=204)
+
+
+@app.put("/v1/auth/password")
+def change_password(data: PasswordChange, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(401, "Current password is incorrect")
+    user.password_hash = hash_password(data.new_password)
+    now = datetime.now(timezone.utc)
+    for session in db.scalars(select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))).all():
+        session.revoked_at = now
+    audit(db, user.id, "password.changed", "user", user.id); db.commit()
+    return {"message": "Password changed. Sign in again on this device."}
+
+
+ALLOWED_UPLOAD_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+@app.post("/v1/uploads", status_code=201)
+async def upload_private_file(
+    file: UploadFile = File(...),
+    category: str = Form(default="job_evidence"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if file.content_type not in ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(415, "Use a JPG, PNG, WebP or PDF file")
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if not content:
+        raise HTTPException(422, "The selected file is empty")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Files must be 5 MB or smaller")
+    safe_name = (file.filename or "upload").replace("\\", "_").replace("/", "_")[:240]
+    item = StoredFile(owner_id=user.id, filename=safe_name, content_type=file.content_type, category=category[:40], size_bytes=len(content), content=content)
+    db.add(item); db.flush(); audit(db, user.id, "file.uploaded", "stored_file", item.id, {"category": item.category, "size": item.size_bytes}); db.commit(); db.refresh(item)
+    return {"id": item.id, "filename": item.filename, "content_type": item.content_type, "size_bytes": item.size_bytes, "url": f"/api/marketplace/uploads/{item.id}"}
+
+
+@app.get("/v1/uploads/{file_id}")
+def download_private_file(file_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = db.get(StoredFile, file_id)
+    if not item:
+        raise HTTPException(404, "File not found")
+    if item.owner_id != user.id and user.role not in {UserRole.admin, UserRole.support}:
+        raise HTTPException(403, "This file is not available to your account")
+    return Response(
+        content=item.content,
+        media_type=item.content_type,
+        headers={"Content-Disposition": f'inline; filename="{item.filename.replace(chr(34), "")}"', "Cache-Control": "private, no-store"},
+    )
 
 
 @app.get("/v1/estates")

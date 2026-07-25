@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, LocateFixed, Mail, MapPin, Phone, Search, ShieldCheck, Smartphone, Star, WalletCards } from "lucide-react";
+import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, LocateFixed, Mail, MapPin, Phone, Search, ShieldCheck, Smartphone, Star, WalletCards, Wrench } from "lucide-react";
 import { categories, nairobiEstates, type Artisan } from "@/lib/data";
 import { iconMap } from "./icons";
 import { NairobiMap } from "./nairobi-map";
@@ -87,9 +87,9 @@ export function HomeClient() {
         </div>
         <section className="hero">
           <div className="hero-copy">
-            <div className="eyebrow"><span className="live-dot" />{sw?"Mtandao wa mafundi waliothibitishwa Nairobi":"Nairobi-first verified artisan network"}</div>
-            <h1>{sw?"Msaada wa kuaminika,":"Trusted help,"}<br /><span>{sw?"karibu nawe.":"right around the corner."}</span></h1>
-            <p>{sw?"Agiza mafundi wenye ujuzi na waliokaguliwa kwa dakika. Bei wazi, taarifa za moja kwa moja na kazi yenye dhamana.":"Book skilled, background-checked artisans in minutes. Clear pricing, real-time updates, and work guaranteed."}</p>
+            <div className="eyebrow">{sw?"Mtandao wa mafundi waliothibitishwa Nairobi":"Nairobi’s trusted work network"}</div>
+            <h1>{sw?"Kila kazi ya nyumbani,":"Every home job,"}<br /><span>{sw?"imefanywa vizuri.":"handled beautifully."}</span></h1>
+            <p>{sw?"Eleza kazi yako, linganisha mafundi waliothibitishwa na usimamie kila hatua mahali pamoja.":"Describe the job once. Compare verified professionals, agree the work, and follow every step from one protected place."}</p>
             <form ref={searchRef} className="search-box" onSubmit={submitSearch}>
               <label>
                 <span>{sw?"Unahitaji nini?":"What do you need?"}</span>
@@ -110,17 +110,19 @@ export function HomeClient() {
               <span><Star size={17} fill="currentColor" /> Reviews tied to completed jobs</span>
             </div>
           </div>
-          <div className="hero-visual solid-hero">
-            <div className="hero-monogram"><span>MM</span><small>Nairobi&apos;s trusted work network</small></div>
-            <div className="service-orbit orbit-one">Plumbing <strong>486</strong></div>
-            <div className="service-orbit orbit-two">Electrical <strong>371</strong></div>
-            <div className="service-orbit orbit-three">Carpentry <strong>294</strong></div>
-            <div className="availability-card">
-              <div className="avatar-stack solid"><span>JM</span><span>MW</span><span>SO</span></div>
-              <div><strong>Live availability</strong><span>Shown only when professionals are online</span></div>
-              <span className="status-pulse" />
+          <div className="hero-visual hero-marketplace">
+            <div className="hero-market-card">
+              <div className="hero-market-head"><span><MapPin size={15}/> {area}, Nairobi</span><small>Live marketplace</small></div>
+              <div className="hero-market-title"><span className="hero-tool"><Wrench/></span><div><small>What needs attention?</small><strong>{active === "All" ? "Find the right professional" : active}</strong></div></div>
+              <div className="hero-pro-list">
+                {artisans.slice(0,3).map((artisan,index)=><Link href={`/artisan/${artisan.id}`} key={artisan.id}><span className="hero-pro-avatar" style={{background:artisan.color}}>{artisan.initials}</span><span><strong>{artisan.name}</strong><small>{artisan.trade} · {artisan.area}</small></span><b><Star size={11} fill="currentColor"/>{artisan.rating||"New"}</b><ChevronRight size={15}/></Link>)}
+                {!searching && !artisans.length && <div className="hero-market-empty"><ShieldCheck/><span><strong>No false availability</strong><small>We only show verified professionals when they are genuinely online.</small></span></div>}
+                {searching && <div className="hero-market-loading"><span/><span/><span/></div>}
+              </div>
+              <Link className="hero-market-action" href={`/post-job?area=${encodeURIComponent(area)}`}>Describe your job <ArrowRight size={16}/></Link>
             </div>
-            <div className="rating-card"><span className="rating-icon"><Star size={18} fill="currentColor" /></span><div><strong>Verified reviews</strong><span>Only after completed jobs</span></div></div>
+            <div className="hero-proof-card"><BadgeCheck size={19}/><span><strong>Verified before visibility</strong><small>Identity, work history and reviews stay connected.</small></span></div>
+            <div className="hero-step-card"><span>01</span><div><small>Your next step</small><strong>Compare. Book. Track.</strong></div></div>
           </div>
         </section>
 
@@ -179,7 +181,7 @@ export function HomeClient() {
       <footer className="site-footer">
         <div className="footer-main">
           <div className="footer-intro">
-            <div className="brand footer-brand">Mafundi<span className="brand-dot">.</span></div>
+            <div className="brand footer-brand">Mafundi Mtaani<span className="brand-dot">.</span></div>
             <p>Trusted work. Stronger neighbourhoods. Book verified artisans across Nairobi with confidence.</p>
             <Link className="button button-dark" href="/post-job">Post a job <ArrowRight size={16} /></Link>
           </div>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, LockKeyhole } from "lucide-react";
 import Link from "next/link";
+import { requestOptions, serializeCredential } from "@/lib/passkeys";
 
 export function LoginForm({portal="client"}:{portal?:"client"|"artisan"|"operations"}) {
   const router = useRouter();
@@ -30,6 +31,22 @@ export function LoginForm({portal="client"}:{portal?:"client"|"artisan"|"operati
     const requested=params.get("next");
     router.replace(requested?.startsWith("/")?requested:fallback);
     router.refresh();
+  };
+  const passkeyLogin = async () => {
+    if (!window.PublicKeyCredential) return setError("Passkeys are not supported by this browser.");
+    setLoading(true); setError("");
+    try {
+      const optionResponse = await fetch("/api/auth/passkey/options", { method: "POST" });
+      const data = await optionResponse.json();
+      if (!optionResponse.ok) throw new Error(data.detail || "Passkey sign-in is unavailable.");
+      const credential = await navigator.credentials.get({ publicKey: requestOptions(data.options) }) as PublicKeyCredential | null;
+      if (!credential) throw new Error("No passkey was selected.");
+      const response = await fetch("/api/auth/passkey/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ challenge_id: data.challenge_id, credential: serializeCredential(credential), expected_role: portal }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Passkey sign-in failed.");
+      window.location.href = result.user.role === "artisan" ? "/artisan/dashboard" : ["admin", "support"].includes(result.user.role) ? "/admin" : "/client/dashboard";
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Passkey sign-in failed."); }
+    finally { setLoading(false); }
   };
   return (
     <main className="auth-shell">
@@ -73,6 +90,9 @@ export function LoginForm({portal="client"}:{portal?:"client"|"artisan"|"operati
               Sign in <ArrowRight size={16} />
             </>
           )}
+        </button>
+        <button type="button" disabled={loading} className="button button-outline button-wide passkey-signin" onClick={() => void passkeyLogin()}>
+          <LockKeyhole size={17}/> Use a passkey
         </button>
         {portal === "client" && (
           <>

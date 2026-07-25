@@ -112,6 +112,22 @@ def test_safety_and_privacy_are_private_and_persistent():
         assert export.json()["consents"][0]["granted"] is True
 
 
+def test_private_uploads_sessions_and_passkey_options():
+    with TestClient(app) as client:
+        token = register(client, "secure-client@test.local")
+        headers = {"Authorization": f"Bearer {token}"}
+        uploaded = client.post("/v1/uploads", headers=headers, data={"category":"job_evidence"}, files={"file":("repair.png", b"\x89PNG\r\nsecure-test", "image/png")})
+        assert uploaded.status_code == 201
+        assert client.get(uploaded.json()["url"].replace("/api/marketplace", "/v1"), headers=headers).content == b"\x89PNG\r\nsecure-test"
+        assert len(client.get("/v1/auth/sessions", headers=headers).json()) == 1
+        options = client.post("/v1/auth/passkeys/register/options", headers=headers)
+        assert options.status_code == 200
+        assert options.json()["options"]["rp"]["name"] == "Mafundi Mtaani"
+        changed = client.put("/v1/auth/password", headers=headers, json={"current_password":"A-secure-password-123","new_password":"A-new-secure-password-456"})
+        assert changed.status_code == 200
+        assert client.get("/v1/auth/me", headers=headers).status_code == 401
+
+
 def test_artisan_application_and_admin_approval():
     with TestClient(app) as client:
         artisan_token = register(client, "artisan@test.local", "artisan")

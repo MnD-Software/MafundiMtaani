@@ -148,7 +148,7 @@ export function AdminDashboard({
     <main className="ops-shell">
       <aside className="ops-sidebar">
         <Link className="brand ops-brand" href="/">
-          Mafundi<span className="brand-dot">.</span>
+          Mafundi Mtaani<span className="brand-dot">.</span>
           <small>OPS</small>
         </Link>
         <p>Workspace</p>

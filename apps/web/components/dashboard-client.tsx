@@ -9,12 +9,14 @@ import {
   CircleDollarSign,
   Clock3,
   LayoutDashboard,
+  KeyRound,
   MapPin,
   MessageSquare,
   ShieldCheck,
   Star,
   UserRound,
 } from "lucide-react";
+import { creationOptions, serializeCredential } from "@/lib/passkeys";
 
 type Job = {
   id: string;
@@ -95,6 +97,7 @@ export function DashboardClient({
     ["care", artisanMode ? "Support" : "Property care", MapPin],
     ["reviews", "Reviews", Star],
     ["safety", "Safety & privacy", ShieldCheck],
+    ["security", "Sign-in & security", KeyRound],
   ] as const;
   const completed = jobs.filter((job) => job.status === "completed").length;
   const active = jobs.filter((job) =>
@@ -105,7 +108,7 @@ export function DashboardClient({
     <main className="dashboard-shell">
       <aside className="dashboard-sidebar">
         <Link className="brand dashboard-brand" href="/">
-          Mafundi<span className="brand-dot">.</span>
+          Mafundi Mtaani<span className="brand-dot">.</span>
           <small>{artisanMode ? "PRO" : "CLIENT"}</small>
         </Link>
         <nav>
@@ -295,6 +298,7 @@ export function DashboardClient({
           />
         )}
         {section === "safety" && <SafetyAndPrivacy />}
+        {section === "security" && <SecurityCenter />}
         {section === "care" && <CareAndSupport artisanMode={artisanMode}/>}
         {section === "schedule" && <SchedulePanel />}
         {section === "profile" && (
@@ -307,6 +311,62 @@ export function DashboardClient({
       </section>
     </main>
   );
+}
+
+function SecurityCenter() {
+  type Passkey = { id: string; label: string; created_at: string; last_used_at: string | null };
+  type Session = { id: string; user_agent: string; ip_address: string; created_at: string; last_seen_at: string };
+  const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [notice, setNotice] = useState("");
+  const load = async () => {
+    const [passkeyResponse, sessionResponse] = await Promise.all([fetch("/api/marketplace/auth/passkeys"), fetch("/api/marketplace/auth/sessions")]);
+    if (passkeyResponse.ok) setPasskeys(await passkeyResponse.json());
+    if (sessionResponse.ok) setSessions(await sessionResponse.json());
+  };
+  useEffect(() => { void load(); }, []);
+  const addPasskey = async () => {
+    if (!window.PublicKeyCredential) return setNotice("Passkeys are not supported by this browser.");
+    try {
+      const response = await fetch("/api/marketplace/auth/passkeys/register/options", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail);
+      const credential = await navigator.credentials.create({ publicKey: creationOptions(data.options) }) as PublicKeyCredential | null;
+      if (!credential) throw new Error("Passkey setup was cancelled.");
+      const complete = await fetch("/api/marketplace/auth/passkeys/register/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ challenge_id: data.challenge_id, credential: serializeCredential(credential), label: navigator.platform || "This device" }) });
+      const result = await complete.json();
+      if (!complete.ok) throw new Error(result.detail);
+      setNotice("Passkey added. You can now sign in using this device."); void load();
+    } catch (reason) { setNotice(reason instanceof Error ? reason.message : "Passkey setup failed."); }
+  };
+  const revoke = async (sessionId: string) => {
+    await fetch(`/api/marketplace/auth/sessions/${sessionId}`, { method: "DELETE" });
+    setNotice("That session has been signed out."); void load();
+  };
+  const changePassword = async () => {
+    const current_password = window.prompt("Current password");
+    const new_password = window.prompt("New password (at least 10 characters)");
+    if (!current_password || !new_password) return;
+    const response = await fetch("/api/marketplace/auth/password", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current_password, new_password }) });
+    const data = await response.json();
+    if (!response.ok) return setNotice(data.detail || "Password could not be changed.");
+    await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login";
+  };
+  return <section className="dash-panel-page security-center">
+    <span className="kicker">Account protection</span><h2>Sign-in & security</h2>{notice && <p className="form-success">{notice}</p>}
+    <div className="section-heading"><div><h2>Passkeys</h2><p>Use Face ID, Touch ID, Windows Hello or your device screen lock.</p></div><button onClick={() => void addPasskey()}>Add passkey</button></div>
+    {passkeys.length ? passkeys.map((item) => <article className="dashboard-room-link" key={item.id}><span><strong>{item.label}</strong><small>Added {new Date(item.created_at).toLocaleDateString()}{item.last_used_at ? ` · Used ${new Date(item.last_used_at).toLocaleDateString()}` : ""}</small></span><KeyRound size={17}/></article>) : <EmptyPanel title="No passkeys yet" text="Add one for faster phishing-resistant sign-in."/>}
+    <div className="section-heading"><div><h2>Active sessions</h2><p>Review devices that currently have access to this account.</p></div><button onClick={() => void changePassword()}>Change password</button></div>
+    {sessions.map((item) => <article className="dashboard-room-link" key={item.id}><span><strong>{deviceName(item.user_agent)}</strong><small>{item.ip_address || "Private network"} · Active {new Date(item.last_seen_at).toLocaleString()}</small></span><button onClick={() => void revoke(item.id)}>Sign out</button></article>)}
+  </section>;
+}
+
+function deviceName(agent: string) {
+  if (/iPhone|iPad/.test(agent)) return "Apple mobile device";
+  if (/Android/.test(agent)) return "Android device";
+  if (/Windows/.test(agent)) return "Windows device";
+  if (/Macintosh/.test(agent)) return "Mac";
+  return "Web browser";
 }
 
 function SafetyAndPrivacy() {

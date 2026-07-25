@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     masked_call_provider_url: str = ""
     masked_call_provider_token: str = ""
     google_client_id: str = ""
+    webauthn_rp_id: str = ""
+    webauthn_origin: str = ""
     platform_fee_rate: float = 0.10
     tax_rate: float = 0.0
     # Ignore retired bootstrap-only variables that may still exist in a host's
