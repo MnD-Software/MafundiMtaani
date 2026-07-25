@@ -4,6 +4,7 @@ import { AppHeader } from "@/components/app-header";
 import { MobileNav } from "@/components/mobile-nav";
 import { ExperienceProvider } from "@/components/experience-provider";
 import { SeasonalCampaign } from "@/components/seasonal-campaign";
+import { LiveLocationProvider } from "@/components/live-location-provider";
 import "./globals.css";
 import "./premium.css";
 import "./interactions.css";
@@ -20,12 +21,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={manrope.variable}><ExperienceProvider>
+      <body className={manrope.variable}><ExperienceProvider><LiveLocationProvider>
         <AppHeader />
         <SeasonalCampaign />
         {children}
         <MobileNav />
-      </ExperienceProvider></body>
+      </LiveLocationProvider></ExperienceProvider></body>
     </html>
   );
 }

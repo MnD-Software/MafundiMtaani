@@ -425,6 +425,16 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class PortfolioItem(Base):
+    __tablename__ = "portfolio_items"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    artisan_id: Mapped[str] = mapped_column(ForeignKey("artisans.id"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    file_url: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Promotion(Base):
     __tablename__ = "promotions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

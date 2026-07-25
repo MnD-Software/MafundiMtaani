@@ -2,14 +2,16 @@
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, LocateFixed, Mail, MapPin, Phone, Search, ShieldCheck, Smartphone, Star, WalletCards, Wrench } from "lucide-react";
+import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, LocateFixed, Mail, MapPin, Navigation, Phone, Search, ShieldCheck, Smartphone, Star, WalletCards, Wrench } from "lucide-react";
 import { categories, nairobiEstates, type Artisan } from "@/lib/data";
 import { iconMap } from "./icons";
 import { NairobiMap } from "./nairobi-map";
 import { useExperience } from "./experience-provider";
+import { useLiveLocation } from "./live-location-provider";
 
 export function HomeClient() {
   const {language}=useExperience();const sw=language==="sw";
+  const live=useLiveLocation();
   const [query, setQuery] = useState("");
   const [area, setArea] = useState("Kilimani");
   const [active, setActive] = useState("All");
@@ -19,6 +21,7 @@ export function HomeClient() {
   const [searchDocked, setSearchDocked] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLFormElement>(null);
+  useEffect(() => { if (live.area) setArea(live.area); }, [live.area]);
   useEffect(() => {
     const element = searchRef.current;
     if (!element) return;
@@ -80,7 +83,7 @@ export function HomeClient() {
         <div className={`search-dock ${searchDocked ? "visible" : ""}`}>
           <form onSubmit={submitSearch}>
             <label><Search size={17} /><input value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder="What needs fixing?" aria-label="Search service" /></label>
-            <label><MapPin size={17} /><select value={area} onChange={(event) => setArea(event.target.value)} aria-label="Select estate">{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></label>
+            <label><MapPin size={17} /><select value={area} onChange={(event) => setArea(event.target.value)} aria-label="Select estate">{!nairobiEstates.includes(area)&&<option>{area}</option>}{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></label>
             <button type="submit"><Search size={18} /><span>Find help</span></button>
             {searchOpen && predictiveResults(true)}
           </form>
@@ -98,11 +101,12 @@ export function HomeClient() {
               <div className="search-divider" />
               <label className="location-field">
                 <span>Where?</span>
-                <div><MapPin size={19} /><select value={area} onChange={(e) => setArea(e.target.value)} aria-label="Select Nairobi estate">{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></div>
+                <div><MapPin size={19} /><select value={area} onChange={(e) => setArea(e.target.value)} aria-label="Select Nairobi estate">{!nairobiEstates.includes(area)&&<option>{area}</option>}{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></div>
               </label>
               <button className="search-submit" aria-label="Search"><Search size={22} /></button>
               {searchOpen && predictiveResults()}
             </form>
+            <button className={`hero-live-location ${live.state==="live"?"active":""}`} type="button" onClick={live.start}><Navigation size={14}/>{live.state==="live"?`Using live area: ${live.area}`:live.state==="locating"?"Finding your area…":"Use my current location"}</button>
             {searched && <p className="search-note">Live predictive results for {area} are shown above.</p>}
             <div className="trust-row">
               <span><ShieldCheck size={18} /> Background checked</span>

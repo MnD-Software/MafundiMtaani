@@ -23,7 +23,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, AuthSession, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, OrganizationMember, PasskeyChallenge, PasskeyCredential, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SOSAlert, StoredFile, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, AuthSession, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, OrganizationMember, PasskeyChallenge, PasskeyCredential, PaymentMethod, PaymentStatus, PaymentTransaction, PortfolioItem, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SOSAlert, StoredFile, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -49,6 +49,13 @@ NAIROBI_AREAS = {
     "Thome", "Umoja", "Umoja 1", "Umoja 2", "Umoja 3", "Upper Hill", "Utawala", "Valley Arcade",
     "Waithaka", "Westlands", "Woodley", "Zimmerman", "Ziwani"
 }
+
+LOCATION_FALLBACKS = {
+    "Westlands": (-1.2676, 36.8108), "Kilimani": (-1.2921, 36.7839), "CBD": (-1.2864, 36.8172),
+    "Kasarani": (-1.2258, 36.8980), "Embakasi": (-1.3167, 36.8917), "Karen": (-1.3197, 36.7060),
+    "Umoja": (-1.2833, 36.8917), "Dagoretti Corner": (-1.2967, 36.7539), "Rongai": (-1.3964, 36.7623),
+}
+location_cache: dict[tuple[float, float], str] = {}
 
 
 @asynccontextmanager
@@ -326,6 +333,26 @@ def download_private_file(file_id: str, db: Session = Depends(get_db), user: Use
 @app.get("/v1/estates")
 def list_estates() -> dict:
     return {"county": "Nairobi", "areas": sorted(NAIROBI_AREAS), "total": len(NAIROBI_AREAS)}
+
+
+@app.get("/v1/location/reverse")
+async def reverse_location(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180)):
+    key = (round(lat, 3), round(lng, 3))
+    if key in location_cache:
+        return {"area": location_cache[key], "latitude": lat, "longitude": lng, "source": "cache"}
+    area = ""
+    try:
+        async with httpx.AsyncClient(timeout=8, headers={"User-Agent":"MafundiMtaani/2.1 (info@mafundimtaani.co.ke)"}) as client:
+            response = await client.get("https://nominatim.openstreetmap.org/reverse", params={"lat":lat, "lon":lng, "format":"jsonv2", "zoom":16, "addressdetails":1})
+        if response.is_success:
+            address = response.json().get("address", {})
+            area = next((str(address.get(field, "")).strip() for field in ("suburb","neighbourhood","quarter","city_district","village","town") if address.get(field)), "")
+    except httpx.HTTPError:
+        pass
+    if not area:
+        area = min(LOCATION_FALLBACKS, key=lambda name: (LOCATION_FALLBACKS[name][0]-lat)**2 + (LOCATION_FALLBACKS[name][1]-lng)**2)
+    location_cache[key] = area
+    return {"area": area, "latitude": lat, "longitude": lng, "source": "reverse_geocode" if area not in LOCATION_FALLBACKS else "nearest_area"}
 
 
 @app.get("/v1/artisans", response_model=list[ArtisanOut])
@@ -991,6 +1018,39 @@ def set_availability(items: list[AvailabilityCreate], db: Session = Depends(get_
 def list_notifications(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
     rows = db.scalars(select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc()).limit(50)).all()
     return [{"id":row.id,"title":row.title,"body":row.body,"channel":row.channel,"read":row.read,"created_at":row.created_at} for row in rows]
+
+
+@app.patch("/v1/notifications/{notification_id}")
+def read_notification(notification_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = db.scalar(select(Notification).where(Notification.id == notification_id, Notification.user_id == user.id))
+    if not item:
+        raise HTTPException(404, "Notification not found")
+    item.read = True; db.commit()
+    return {"id": item.id, "read": True}
+
+
+class PortfolioCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=160)
+    description: str = Field(default="", max_length=1000)
+    file_url: str = Field(default="", max_length=500)
+
+
+@app.get("/v1/artisans/{artisan_id}/portfolio")
+def public_portfolio(artisan_id: str, db: Session = Depends(get_db)):
+    if not db.get(Artisan, artisan_id):
+        raise HTTPException(404, "Artisan not found")
+    rows = db.scalars(select(PortfolioItem).where(PortfolioItem.artisan_id == artisan_id).order_by(PortfolioItem.created_at.desc()).limit(12)).all()
+    return [{"id": item.id, "title": item.title, "description": item.description, "file_url": item.file_url, "created_at": item.created_at} for item in rows]
+
+
+@app.post("/v1/artisans/me/portfolio", status_code=201)
+def add_portfolio_item(data: PortfolioCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))):
+    artisan = user_artisan(db, user)
+    if not artisan:
+        raise HTTPException(403, "Approved artisan profile required")
+    item = PortfolioItem(artisan_id=artisan.id, **data.model_dump())
+    db.add(item); db.flush(); audit(db, user.id, "portfolio.created", "portfolio_item", item.id); db.commit(); db.refresh(item)
+    return item
 
 
 @app.get("/v1/integrations/status")

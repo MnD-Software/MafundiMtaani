@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, ImagePlus, LoaderCircle, MapPin, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, ArrowRight, CheckCircle2, ImagePlus, LoaderCircle, MapPin, Navigation, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { nairobiEstates } from "@/lib/data";
+import { useLiveLocation } from "./live-location-provider";
 
 const steps = ["The job", "Location & timing", "Budget & contact"];
 
 export function JobForm() {
+  const live = useLiveLocation();
   const [step, setStep] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [reference, setReference] = useState("");
@@ -16,6 +18,7 @@ export function JobForm() {
   const [files, setFiles] = useState<File[]>([]);
   const [form, setForm] = useState({ trade: "Plumbing", title: "", description: "", area: "Kilimani", urgency: "today", budgetMin: "", budgetMax: "", name: "", phone: "" });
   const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  useEffect(() => { if (live.area) setForm((current) => ({ ...current, area:live.area! })); }, [live.area]);
   const submitJob = async () => {
     setSending(true); setError("");
     try {
@@ -45,7 +48,7 @@ export function JobForm() {
       <form className="job-form" onSubmit={(e) => { e.preventDefault(); if (step < 2) setStep(step + 1); else void submitJob(); }}>
         <div className="progress">{steps.map((name, index) => <div className={index <= step ? "current" : ""} key={name}><span>{index + 1}</span><small>{name}</small></div>)}</div>
         {step === 0 && <div className="form-panel"><h2>Describe the work</h2><label>Service needed<select value={form.trade} onChange={(e) => update("trade", e.target.value)}><option>Plumbing</option><option>Electrical</option><option>Carpentry</option><option>Painting</option><option>Appliance repair</option><option>Cleaning</option></select></label><label>Job title<input required value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Fix a leaking kitchen tap" /></label><label>Tell us more<textarea required value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="What happened? Include any useful measurements or details." rows={5} /></label><label className="upload-box"><ImagePlus size={23} /><span><strong>{files.length ? `${files.length} photo${files.length > 1 ? "s" : ""} added` : "Add photos"}</strong><small>{files.length ? files.map((file) => file.name).join(", ") : "JPG, PNG or WebP · 5 MB each"}</small></span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setFiles(Array.from(event.target.files || []))} /></label></div>}
-        {step === 1 && <div className="form-panel"><h2>Where and when?</h2><label>Estate or neighbourhood<div className="input-icon"><MapPin size={18} /><select value={form.area} onChange={(e) => update("area", e.target.value)}>{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></div></label><label>When do you need help?<div className="choice-grid">{[["today","Today"],["week","This week"],["scheduled","Choose a date"]].map(([value, label]) => <button type="button" className={form.urgency === value ? "selected" : ""} onClick={() => update("urgency", value)} key={value}>{label}</button>)}</div></label></div>}
+        {step === 1 && <div className="form-panel"><h2>Where and when?</h2><button type="button" className="live-area-button" onClick={live.start}><Navigation size={16}/>{live.state==="live"?`Live area: ${live.area}`:live.state==="locating"?"Finding your area…":"Use my live location"}</button><label>Estate or neighbourhood<div className="input-icon"><MapPin size={18} /><select value={form.area} onChange={(e) => update("area", e.target.value)}>{!nairobiEstates.includes(form.area)&&<option>{form.area}</option>}{nairobiEstates.map((estate) => <option key={estate}>{estate}</option>)}</select></div></label><label>When do you need help?<div className="choice-grid">{[["today","Today"],["week","This week"],["scheduled","Choose a date"]].map(([value, label]) => <button type="button" className={form.urgency === value ? "selected" : ""} onClick={() => update("urgency", value)} key={value}>{label}</button>)}</div></label></div>}
         {step === 2 && <div className="form-panel"><h2>Budget and contact</h2><div className="field-row"><label>Minimum budget<input type="number" value={form.budgetMin} onChange={(e) => update("budgetMin", e.target.value)} placeholder="KSh 1,000" /></label><label>Maximum budget<input type="number" value={form.budgetMax} onChange={(e) => update("budgetMax", e.target.value)} placeholder="KSh 5,000" /></label></div><label>Your name<input required value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Full name" /></label><label>Mobile number<input required value={form.phone} onChange={(e) => update("phone", e.target.value)} placeholder="+254 7..." /></label><div className="summary-box"><strong>{form.title || `${form.trade} job`} · {form.area}</strong><span>{form.urgency === "today" ? "Needed today" : "Flexible timing"} · Quotes are free</span></div></div>}
         {error && <p className="form-error">{error}</p>}
         <div className="form-actions">{step > 0 ? <button type="button" className="button button-quiet" onClick={() => setStep(step - 1)}>Back</button> : <span />}<button disabled={sending} className="button button-dark">{sending ? <><LoaderCircle className="spin" size={17} /> Posting securely</> : <>{step === 2 ? "Post job" : "Continue"} <ArrowRight size={17} /></>}</button></div>
