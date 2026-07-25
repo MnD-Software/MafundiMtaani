@@ -1,6 +1,7 @@
 export type Artisan = {
   id: string;
   name: string;
+  avatarUrl?: string;
   initials: string;
   trade: string;
   area: string;

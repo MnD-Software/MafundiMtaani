@@ -23,7 +23,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, AuthSession, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, NotificationPreference, OrganizationMember, PasskeyChallenge, PasskeyCredential, PaymentMethod, PaymentStatus, PaymentTransaction, PortfolioItem, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SavedSearch, SOSAlert, StoredFile, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, AuthSession, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, InquiryMessage, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, NotificationPreference, OrganizationMember, PasskeyChallenge, PasskeyCredential, PaymentMethod, PaymentStatus, PaymentTransaction, PortfolioItem, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SavedSearch, SOSAlert, StoredFile, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -350,7 +350,7 @@ def download_private_file(file_id: str, db: Session = Depends(get_db), user: Use
 @app.get("/v1/public-files/{file_id}")
 def public_portfolio_file(file_id: str, db: Session = Depends(get_db)):
     item = db.get(StoredFile, file_id)
-    if not item or item.category != "portfolio":
+    if not item or item.category not in {"portfolio", "avatar"}:
         raise HTTPException(404, "File not found")
     return Response(content=item.content, media_type=item.content_type, headers={"Cache-Control":"public, max-age=86400, immutable"})
 
@@ -381,7 +381,7 @@ async def reverse_location(lat: float = Query(ge=-90, le=90), lng: float = Query
 
 
 @app.get("/v1/artisans", response_model=list[ArtisanOut])
-def list_artisans(q: str | None = None, trade: str | None = None, area: str | None = None, available: bool | None = None, db: Session = Depends(get_db)):
+def list_artisans(q: str | None = None, trade: str | None = None, area: str | None = None, available: bool | None = None, min_rating: float | None = None, min_experience: int | None = None, db: Session = Depends(get_db)):
     query = select(Artisan).where(Artisan.verified.is_(True))
     if q:
         term = f"%{q.strip()}%"
@@ -392,7 +392,11 @@ def list_artisans(q: str | None = None, trade: str | None = None, area: str | No
         query = query.where(Artisan.area == area)
     if available is not None:
         query = query.where(Artisan.available.is_(available))
-    return db.scalars(query.order_by(Artisan.available.desc(), Artisan.rating.desc(), Artisan.completed_jobs.desc()).limit(50)).all()
+    if min_rating is not None:
+        query = query.where(Artisan.rating >= min_rating)
+    if min_experience is not None:
+        query = query.where(Artisan.years_experience >= min_experience)
+    return db.scalars(query.order_by(Artisan.available.desc(), Artisan.rating.desc(), Artisan.completed_jobs.desc(), Artisan.years_experience.desc()).limit(50)).all()
 
 
 @app.get("/v1/artisans/{artisan_id}", response_model=ArtisanOut)
@@ -493,7 +497,9 @@ def review_application(application_id: str, review: ApplicationReview, db: Sessi
         user = db.get(User, application.user_id)
         if user:
             user.role = UserRole.artisan
-        db.add(Artisan(user_id=application.user_id, name=application.name, trade=application.trade, area=application.area, phone=application.phone, skills=[], verified=True, available=False))
+        existing = db.scalar(select(Artisan).where(Artisan.user_id == application.user_id))
+        if not existing:
+            db.add(Artisan(user_id=application.user_id, name=application.name, trade=application.trade, area=application.area, phone=application.phone, years_experience=application.years_experience, skills=[], verified=True, available=False))
     db.commit()
     db.refresh(application)
     return application
@@ -585,7 +591,7 @@ def user_artisan(db: Session, user: User) -> Artisan | None:
 def get_my_artisan_profile(db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))) -> dict:
     artisan=user_artisan(db,user)
     if not artisan: raise HTTPException(404,"Approved artisan profile not found")
-    return {"id":artisan.id,"name":artisan.name,"trade":artisan.trade,"area":artisan.area,"bio":artisan.bio,"skills":artisan.skills,"available":artisan.available,"rating":artisan.rating,"completed_jobs":artisan.completed_jobs}
+    return {"id":artisan.id,"name":artisan.name,"trade":artisan.trade,"area":artisan.area,"avatar_url":artisan.avatar_url,"years_experience":artisan.years_experience,"bio":artisan.bio,"skills":artisan.skills,"available":artisan.available,"rating":artisan.rating,"completed_jobs":artisan.completed_jobs}
 
 
 @app.patch("/v1/artisans/me")
@@ -597,6 +603,25 @@ def update_my_artisan_profile(data: ArtisanProfileUpdate, db: Session = Depends(
     audit(db,user.id,"artisan.profile_updated","artisan",artisan.id,{"area":artisan.area,"available":artisan.available})
     db.commit();db.refresh(artisan)
     return {"id":artisan.id,"bio":artisan.bio,"skills":artisan.skills,"area":artisan.area,"available":artisan.available}
+
+
+class ArtisanAvatarUpdate(BaseModel):
+    file_id: str
+
+
+@app.put("/v1/artisans/me/avatar")
+def update_artisan_avatar(data: ArtisanAvatarUpdate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))):
+    artisan = user_artisan(db, user)
+    item = db.get(StoredFile, data.file_id)
+    if not artisan:
+        raise HTTPException(404, "Approved artisan profile not found")
+    if not item or item.owner_id != user.id or item.category != "avatar" or not item.content_type.startswith("image/"):
+        raise HTTPException(422, "Choose a profile image uploaded by this account")
+    artisan.avatar_url = f"/api/public-files/{item.id}"
+    user.avatar_url = artisan.avatar_url
+    audit(db, user.id, "artisan.avatar_updated", "artisan", artisan.id)
+    db.commit(); db.refresh(artisan)
+    return {"avatar_url":artisan.avatar_url}
 
 
 def require_job_access(job: Job, db: Session, user: User) -> None:
@@ -1284,6 +1309,10 @@ class InquiryCreate(BaseModel):
     phone: str = Field(min_length=7,max_length=30)
 
 
+class InquiryReply(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
 class CampaignCreate(BaseModel):
     slug: str = Field(min_length=3, max_length=80, pattern=r"^[a-z0-9-]+$")
     name: str = Field(min_length=2, max_length=120)
@@ -1368,8 +1397,49 @@ def list_payment_methods(db: Session = Depends(get_db), user: User = Depends(get
 def create_inquiry(data:InquiryCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
     artisan=db.get(Artisan,data.artisan_id)
     if not artisan or not artisan.verified: raise HTTPException(404,"Verified artisan not found")
-    item=ArtisanInquiry(client_user_id=user.id,**data.model_dump());db.add(item);db.add(Notification(user_id=artisan.user_id,title="New client introduction",body="A client sent a secure introduction. Open your dashboard to respond."));db.flush();audit(db,user.id,"inquiry.created","artisan_inquiry",item.id,{"artisan_id":artisan.id});db.commit();db.refresh(item)
+    item=ArtisanInquiry(client_user_id=user.id,**data.model_dump());db.add(item);db.flush()
+    db.add(InquiryMessage(inquiry_id=item.id,sender_id=user.id,body=data.message))
+    db.add(Notification(user_id=artisan.user_id,title="New client introduction",body="A client sent a secure introduction. Open your dashboard to respond."));audit(db,user.id,"inquiry.created","artisan_inquiry",item.id,{"artisan_id":artisan.id});db.commit();db.refresh(item)
     return {"id":item.id,"status":item.status}
+
+
+def authorized_inquiry(db:Session,inquiry_id:str,user:User) -> tuple[ArtisanInquiry,Artisan]:
+    item=db.get(ArtisanInquiry,inquiry_id)
+    artisan=db.get(Artisan,item.artisan_id) if item else None
+    if not item or not artisan:
+        raise HTTPException(404,"Conversation not found")
+    if item.client_user_id!=user.id and artisan.user_id!=user.id:
+        raise HTTPException(403,"This conversation is not available to your account")
+    return item,artisan
+
+
+@app.get("/v1/inquiries")
+def list_inquiries(db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> list[dict]:
+    query=select(ArtisanInquiry)
+    if user.role in {UserRole.client,UserRole.estate_manager}:
+        query=query.where(ArtisanInquiry.client_user_id==user.id)
+    elif user.role==UserRole.artisan:
+        artisan=user_artisan(db,user)
+        query=query.where(ArtisanInquiry.artisan_id==(artisan.id if artisan else ""))
+    else:
+        raise HTTPException(403,"Use the operations workspace")
+    rows=db.scalars(query.order_by(ArtisanInquiry.created_at.desc())).all()
+    result=[]
+    for item in rows:
+        artisan=db.get(Artisan,item.artisan_id);client=db.get(User,item.client_user_id)
+        messages=db.scalars(select(InquiryMessage).where(InquiryMessage.inquiry_id==item.id).order_by(InquiryMessage.created_at)).all()
+        result.append({"id":item.id,"status":item.status,"artisan_name":artisan.name if artisan else "Artisan","client_name":client.name if client else "Client","created_at":item.created_at,"messages":[{"id":message.id,"body":message.body,"mine":message.sender_id==user.id,"created_at":message.created_at} for message in messages]})
+    return result
+
+
+@app.post("/v1/inquiries/{inquiry_id}/messages",status_code=201)
+def reply_to_inquiry(inquiry_id:str,data:InquiryReply,db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> dict:
+    item,artisan=authorized_inquiry(db,inquiry_id,user)
+    message=InquiryMessage(inquiry_id=item.id,sender_id=user.id,body=data.body);db.add(message)
+    recipient=artisan.user_id if user.id==item.client_user_id else item.client_user_id
+    db.add(Notification(user_id=recipient,title="New marketplace message",body="You have a new reply in a professional conversation."))
+    item.status="active";db.commit();db.refresh(message)
+    return {"id":message.id,"created_at":message.created_at}
 
 
 @app.post("/v1/payment-methods", status_code=201)
@@ -1695,6 +1765,18 @@ def dashboard_metrics(db: Session = Depends(get_db), user: User = Depends(get_cu
         "net_earnings": sum(payment.artisan_net for payment in completed) if user.role == UserRole.artisan else 0,
         "funds_held": sum(payment.amount for payment in payments if payment.status == PaymentStatus.held),
         "transactions": len(payments),
+        "recent_transactions": [
+            {
+                "id": payment.id,
+                "reference": payment.provider_reference,
+                "status": payment.status.value,
+                "gross": payment.amount,
+                "fee": payment.platform_fee,
+                "net": payment.artisan_net if user.role == UserRole.artisan else payment.amount,
+                "created_at": payment.created_at,
+            }
+            for payment in sorted(payments, key=lambda item: item.created_at, reverse=True)[:10]
+        ],
     }
 
 

@@ -10,9 +10,11 @@ import {
   Clock3,
   LayoutDashboard,
   KeyRound,
+  LogOut,
   MapPin,
   MessageSquare,
   Search,
+  Send,
   ShieldCheck,
   Star,
   UserRound,
@@ -49,6 +51,15 @@ type DashboardMetrics = {
   net_earnings: number;
   funds_held: number;
   transactions: number;
+  recent_transactions: Array<{
+    id: string;
+    reference: string;
+    status: string;
+    gross: number;
+    fee: number;
+    net: number;
+    created_at: string;
+  }>;
 };
 const emptyMetrics: DashboardMetrics = {
   role: "",
@@ -60,6 +71,7 @@ const emptyMetrics: DashboardMetrics = {
   net_earnings: 0,
   funds_held: 0,
   transactions: 0,
+  recent_transactions: [],
 };
 
 export function DashboardClient({
@@ -75,6 +87,10 @@ export function DashboardClient({
   const notify = (message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2400);
+  };
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.href = "/";
   };
   const refresh = async () => {
     const [jobsResponse, userResponse, metricsResponse] = await Promise.all([
@@ -131,6 +147,10 @@ export function DashboardClient({
           <button onClick={() => setSection("profile")}>
             <UserRound />
             My profile
+          </button>
+          <button onClick={() => void logout()}>
+            <LogOut />
+            Log out
           </button>
         </div>
       </aside>
@@ -204,6 +224,20 @@ export function DashboardClient({
                 <small>Completed transactions only</small>
               </article>
             </div>
+            {artisanMode && (
+              <div className="artisan-quick-journey">
+                <div>
+                  <span className="kicker">Your next best action</span>
+                  <h2>{active ? "Keep active jobs moving" : "Find work near you"}</h2>
+                  <p>Go from request to quote, job room, completion and payout without leaving your workspace.</p>
+                </div>
+                <div>
+                  <button onClick={() => setSection("jobs")}><BriefcaseBusiness/>View job requests</button>
+                  <button onClick={() => setSection("earnings")}><CircleDollarSign/>See my earnings</button>
+                  <button onClick={() => setSection("profile")}><UserRound/>Update availability</button>
+                </div>
+              </div>
+            )}
             <RoleChart metrics={metrics} />
             <GrowthTools />
             <JobList jobs={jobs} />
@@ -214,6 +248,7 @@ export function DashboardClient({
           <section className="dash-panel-page">
             <span className="kicker">Protected conversations</span>
             <h2>Job rooms</h2>
+            <InquiryInbox artisanMode={artisanMode}/>
             {jobs.length ? (
               jobs.map((job) => (
                 <Link
@@ -280,6 +315,26 @@ export function DashboardClient({
               </article>
             </div>
             {!artisanMode && <PaymentMethods />}
+            {artisanMode && metrics.recent_transactions.length > 0 && (
+              <div className="earnings-ledger">
+                <div className="ledger-head">
+                  <strong>Recent payout activity</strong>
+                  <span>{metrics.transactions} transaction{metrics.transactions === 1 ? "" : "s"}</span>
+                </div>
+                {metrics.recent_transactions.map((item) => (
+                  <article key={item.id}>
+                    <span>
+                      <strong>{item.reference || "Marketplace payment"}</strong>
+                      <small>{new Date(item.created_at).toLocaleDateString()} · {item.status}</small>
+                    </span>
+                    <span>
+                      <strong>KSh {item.net.toLocaleString()}</strong>
+                      <small>Gross {item.gross.toLocaleString()} · Fee {item.fee.toLocaleString()}</small>
+                    </span>
+                  </article>
+                ))}
+              </div>
+            )}
             {!metrics.transactions && (
               <EmptyPanel
                 title="No transactions yet"
@@ -326,6 +381,20 @@ function NotificationCenter() {
     <div className="section-heading"><div><span className="kicker">Discovery</span><h2>Saved searches</h2></div></div>
     {searches.length?searches.map(item=><Link className="dashboard-room-link" key={item.id} href={`/?q=${encodeURIComponent(item.query||item.trade)}&area=${encodeURIComponent(item.area)}`}><span><strong>{item.name}</strong><small>{item.query||item.trade||"All services"} · {item.area||"Any area"}</small></span><Search size={16}/></Link>):<EmptyPanel title="No saved searches" text="Save useful combinations from marketplace search."/>}
   </section>
+}
+
+function InquiryInbox({artisanMode}:{artisanMode:boolean}) {
+  type Thread={id:string;artisan_name:string;client_name:string;status:string;messages:Array<{id:string;body:string;mine:boolean;created_at:string}>};
+  const[threads,setThreads]=useState<Thread[]>([]);const[open,setOpen]=useState("");const[reply,setReply]=useState("");const[notice,setNotice]=useState("");
+  const load=async()=>{const response=await fetch("/api/marketplace/inquiries");if(response.ok)setThreads(await response.json())};
+  useEffect(()=>{void load()},[]);
+  const send=async(id:string)=>{if(!reply.trim())return;const response=await fetch(`/api/marketplace/inquiries/${id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({body:reply.trim()})});if(response.ok){setReply("");setNotice("Reply sent.");void load()}else setNotice("Reply could not be sent.")};
+  if(!threads.length)return <div className="inquiry-inbox-empty"><MessageSquare/><span><strong>No profile conversations yet</strong><small>{artisanMode?"Messages from clients browsing your profile will appear here.":"Start a secure chat from any artisan profile."}</small></span></div>;
+  return <div className="inquiry-inbox"><div className="ledger-head"><strong>Profile conversations</strong><span>{threads.length} thread{threads.length===1?"":"s"}</span></div>{notice&&<small className="form-success">{notice}</small>}
+    {threads.map(thread=><article key={thread.id} className="inquiry-thread"><button onClick={()=>setOpen(open===thread.id?"":thread.id)}><span><strong>{artisanMode?thread.client_name:thread.artisan_name}</strong><small>{thread.messages.at(-1)?.body||"Secure introduction"} · {thread.status}</small></span><MessageSquare/></button>
+      {open===thread.id&&<div className="inquiry-conversation">{thread.messages.map(message=><p className={message.mine?"mine":""} key={message.id}>{message.body}<time>{new Date(message.created_at).toLocaleString()}</time></p>)}<div><input value={reply} onChange={event=>setReply(event.target.value)} placeholder="Write a reply"/><button aria-label="Send reply" onClick={()=>void send(thread.id)}><Send/></button></div></div>}
+    </article>)}
+  </div>;
 }
 
 function SecurityCenter() {
@@ -752,6 +821,7 @@ function ProfileEditor({
     skills: "",
     area: "Kilimani",
     available: false,
+    avatarUrl: "",
   });
   const [loading, setLoading] = useState(artisanMode);
   useEffect(() => {
@@ -765,6 +835,7 @@ function ProfileEditor({
             skills: (data.skills || []).join(", "),
             area: data.area,
             available: data.available,
+            avatarUrl: data.avatar_url || "",
           });
         }
       })
@@ -794,12 +865,50 @@ function ProfileEditor({
         : "Profile could not be saved.",
     );
   };
+  const uploadAvatar = async (file: File) => {
+    if (!file.type.startsWith("image/")) return notify("Choose a JPG, PNG or WebP image.");
+    const payload = new FormData();
+    payload.set("file", file);
+    payload.set("category", "avatar");
+    const uploaded = await fetch("/api/marketplace/uploads", { method: "POST", body: payload });
+    const upload = await uploaded.json();
+    if (!uploaded.ok) return notify(upload.detail || "Profile photo could not be uploaded.");
+    const response = await fetch("/api/marketplace/artisans/me/avatar", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: upload.id }),
+    });
+    const result = await response.json();
+    if (!response.ok) return notify(result.detail || "Profile photo could not be published.");
+    setProfile((current) => ({ ...current, avatarUrl: result.avatar_url }));
+    notify("Profile photo published to marketplace search.");
+  };
   return (
     <section className="dash-panel-page profile-editor">
       <span className="kicker">
         {artisanMode ? "Trust passport" : "Private account"}
       </span>
       <h2>{artisanMode ? "Professional profile" : "Account profile"}</h2>
+      {artisanMode && (
+        <div className="profile-photo-editor">
+          <span>
+            {profile.avatarUrl ? <img src={profile.avatarUrl} alt="Current profile" /> :
+              user?.name?.split(" ").map((part) => part[0]).join("").slice(0, 2) || "MM"}
+          </span>
+          <div>
+            <strong>Your marketplace photo</strong>
+            <small>Use a clear, recent head-and-shoulders photo. Maximum 5 MB.</small>
+            <label className="button button-outline">
+              Add or change photo
+              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void uploadAvatar(file);
+                event.currentTarget.value = "";
+              }}/>
+            </label>
+          </div>
+        </div>
+      )}
       {artisanMode ? (
         <>
           {loading && <p>Loading profile…</p>}

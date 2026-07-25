@@ -97,6 +97,8 @@ class Artisan(Base):
     trade: Mapped[str] = mapped_column(String(100), index=True)
     area: Mapped[str] = mapped_column(String(100), index=True)
     phone: Mapped[str] = mapped_column(String(30))
+    avatar_url: Mapped[str] = mapped_column(String(500), default="")
+    years_experience: Mapped[int] = mapped_column(Integer, default=0)
     bio: Mapped[str] = mapped_column(Text, default="")
     skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     rating: Mapped[float] = mapped_column(Float, default=0)
@@ -595,6 +597,15 @@ class ArtisanInquiry(Base):
     message: Mapped[str] = mapped_column(Text)
     phone: Mapped[str] = mapped_column(String(30))
     status: Mapped[str] = mapped_column(String(24), default="sent", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InquiryMessage(Base):
+    __tablename__ = "inquiry_messages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    inquiry_id: Mapped[str] = mapped_column(ForeignKey("artisan_inquiries.id"), index=True)
+    sender_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

@@ -99,9 +99,15 @@ export function AdminDashboard({
       fetch("/api/admin/metrics"),
     ]);
     if (applicationsResponse.ok) {
-      const items: Application[] = await applicationsResponse.json();
+      const items: Application[] = (await applicationsResponse.json()).filter(
+        (item: Application) => item.status === "pending",
+      );
       setApplications(items);
-      setSelectedId((current) => current || items[0]?.id || "");
+      setSelectedId((current) =>
+        items.some((item) => item.id === current)
+          ? current
+          : items[0]?.id || "",
+      );
     }
     if (metricsResponse.ok) setMetrics(await metricsResponse.json());
   };
@@ -201,10 +207,6 @@ export function AdminDashboard({
               <Bell size={18} />
               {metrics.pending_applications > 0 && <i />}
             </button>
-            <span className="system-healthy">
-              <i />
-              API protected
-            </span>
           </div>
         </header>
         {notice && (
@@ -418,8 +420,16 @@ export function AdminDashboard({
             ) : (
               <aside className="review-detail">
                 <EmptyOperations
-                  title="Select an application"
-                  text="Applicant identity and evidence will appear here."
+                  title={
+                    applications.length
+                      ? "Select an application"
+                      : "Approval queue complete"
+                  }
+                  text={
+                    applications.length
+                      ? "Applicant identity and evidence will appear here."
+                      : "There are no pending artisan applications. Approved profiles are now available in the marketplace."
+                  }
                   compact
                 />
               </aside>

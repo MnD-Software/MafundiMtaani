@@ -38,6 +38,8 @@ class ArtisanOut(BaseModel):
     name: str
     trade: str
     area: str
+    avatar_url: str
+    years_experience: int
     bio: str
     skills: list[str]
     rating: float

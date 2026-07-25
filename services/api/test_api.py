@@ -137,6 +137,15 @@ def test_artisan_application_and_admin_approval():
         reviewed = client.patch(f"/v1/admin/applications/{created.json()['id']}", headers={"Authorization":f"Bearer {admin_token}"}, json={"status":"approved","review_note":"Verified"})
         assert reviewed.status_code == 200
         assert reviewed.json()["status"] == "approved"
+        assert client.get("/v1/admin/applications?application_status=pending", headers={"Authorization":f"Bearer {admin_token}"}).json() == []
+        ranked = client.get("/v1/artisans?area=Donholm&min_experience=4")
+        assert ranked.status_code == 200
+        assert ranked.json()[0]["years_experience"] == 4
+        avatar = client.post("/v1/uploads", headers={"Authorization":f"Bearer {artisan_token}"}, data={"category":"avatar"}, files={"file":("profile.png", b"\x89PNG\r\nprofile-test", "image/png")})
+        assert avatar.status_code == 201
+        published = client.put("/v1/artisans/me/avatar", headers={"Authorization":f"Bearer {artisan_token}"}, json={"file_id":avatar.json()["id"]})
+        assert published.status_code == 200
+        assert client.get(published.json()["avatar_url"].replace("/api/public-files", "/v1/public-files")).status_code == 200
 
 
 def test_quote_job_room_tracking_and_verified_review():

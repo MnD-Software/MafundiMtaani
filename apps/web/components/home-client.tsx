@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, LocateFixed, Mail, MapPin, Navigation, Phone, Search, ShieldCheck, Smartphone, Star, WalletCards, Wrench } from "lucide-react";
+import { ArrowRight, BadgeCheck, BellRing, ChevronRight, Clock3, KeyRound, LocateFixed, Mail, MapPin, Navigation, Phone, Search, ShieldCheck, Smartphone, Star, WalletCards, Wrench, X } from "lucide-react";
 import { categories, nairobiEstates, type Artisan } from "@/lib/data";
 import { iconMap } from "./icons";
 import { NairobiMap } from "./nairobi-map";
@@ -41,8 +41,8 @@ export function HomeClient() {
       try {
         const response = await fetch(`/api/artisans?${params}`, { signal: controller.signal });
         const data = await response.json();
-        if (response.ok) setArtisans(data.map((item: { id:string; name:string; trade:string; area:string; rating:number; completed_jobs:number; verified:boolean; skills:string[] }, index: number) => ({
-          id:item.id, name:item.name, initials:item.name.split(" ").map((part) => part[0]).join("").slice(0,2), trade:item.trade, area:item.area,
+        if (response.ok) setArtisans(data.map((item: { id:string; name:string; avatar_url:string; trade:string; area:string; rating:number; completed_jobs:number; verified:boolean; skills:string[] }, index: number) => ({
+          id:item.id, name:item.name, avatarUrl:item.avatar_url, initials:item.name.split(" ").map((part) => part[0]).join("").slice(0,2), trade:item.trade, area:item.area,
           rating:item.rating, reviews:0, jobs:item.completed_jobs, eta:"Available now", price:"Request a quote", color:["#174f43","#69512e","#3c4f70","#6b3d51"][index%4], verified:item.verified, featured:item.rating>=4.8&&item.completed_jobs>=10, skills:item.skills
         })));
       } catch (error) { if ((error as Error).name !== "AbortError") setArtisans([]); }
@@ -67,13 +67,26 @@ export function HomeClient() {
   const saveSearch=async()=>{const response=await fetch("/api/marketplace/saved-searches",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:`${active==="All"?(query||"Help"):active} in ${area}`,query,trade:active==="All"?"":active,area})});setSaveNotice(response.ok?"Search saved to your account.":response.status===401?"Sign in to save this search.":"Search could not be saved.");window.setTimeout(()=>setSaveNotice(""),2500)};
   const predictiveResults = (compact = false) => (
     <div className={`predictive-results ${compact ? "compact" : ""}`}>
-      <div className="predictive-heading"><strong>Search Mafundi</strong><span>{searching ? "Checking live availability…" : `${artisans.length} live matches`}</span></div>
+                  <div className="predictive-heading">
+                    <div>
+                      <strong>Search Mafundi</strong>
+                      <span>{searching ? "Checking live availability…" : `${artisans.length} live matches`}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="predictive-close"
+                      aria-label="Close search results"
+                      onClick={() => setSearchOpen(false)}
+                    >
+                      <X size={18} aria-hidden="true" />
+                    </button>
+                  </div>
       {!!serviceSuggestions.length && <div className="predictive-group"><small>Services</small>{serviceSuggestions.map((category) => {
         const Icon = iconMap[category.icon as keyof typeof iconMap];
         return <button type="button" key={category.name} onClick={() => { setActive(category.name); setQuery(category.name); setSearchOpen(true); }}><span className="predictive-icon"><Icon size={17} /></span><span><strong>{category.name}</strong><em>Verified professionals near {area}</em></span><ChevronRight size={16} /></button>;
       })}</div>}
       {!!estateSuggestions.length && <div className="predictive-group predictive-estates"><small>Neighbourhoods</small><div>{estateSuggestions.map((estate) => <button type="button" key={estate} onClick={() => { setArea(estate); setQuery(""); setSearchOpen(true); }}><MapPin size={14} />{estate}</button>)}</div></div>}
-      {!!artisans.length && <div className="predictive-group predictive-artisans"><small>Available professionals</small>{artisans.slice(0, 3).map((artisan) => <Link href={`/artisan/${artisan.id}`} key={artisan.id}><span className="predictive-avatar" style={{ background: artisan.color }}>{artisan.initials}</span><span><strong>{artisan.name}</strong><em>{artisan.trade} · {artisan.area}</em></span><span className="predictive-rating"><Star size={12} fill="currentColor" />{artisan.rating}</span></Link>)}</div>}
+      {!!artisans.length && <div className="predictive-group predictive-artisans"><small>Available professionals</small>{artisans.slice(0, 3).map((artisan) => <Link href={`/artisan/${artisan.id}`} key={artisan.id}><span className="predictive-avatar" style={{ background: artisan.color }}>{artisan.avatarUrl?<img src={artisan.avatarUrl} alt=""/>:artisan.initials}</span><span><strong>{artisan.name}</strong><em>{artisan.trade} · {artisan.area}</em></span><span className="predictive-rating"><Star size={12} fill="currentColor" />{artisan.rating}</span></Link>)}</div>}
       {!searching && !serviceSuggestions.length && !estateSuggestions.length && !artisans.length && <div className="predictive-empty"><strong>No exact match yet</strong><span>Post the job and we&apos;ll alert verified artisans nearby.</span><Link href={`/post-job?area=${encodeURIComponent(area)}`}>Post this job</Link></div>}
       <Link className="predictive-cta" href={`/post-job?area=${encodeURIComponent(area)}`}>Describe a custom job <ArrowRight size={15} /></Link>
     </div>
@@ -122,7 +135,7 @@ export function HomeClient() {
               <div className="hero-market-head"><span><MapPin size={15}/> {area}, Nairobi</span><small>Live marketplace</small></div>
               <div className="hero-market-title"><span className="hero-tool"><Wrench/></span><div><small>What needs attention?</small><strong>{active === "All" ? "Find the right professional" : active}</strong></div></div>
               <div className="hero-pro-list">
-                {artisans.slice(0,3).map((artisan,index)=><Link href={`/artisan/${artisan.id}`} key={artisan.id}><span className="hero-pro-avatar" style={{background:artisan.color}}>{artisan.initials}</span><span><strong>{artisan.name}</strong><small>{artisan.trade} · {artisan.area}</small></span><b><Star size={11} fill="currentColor"/>{artisan.rating||"New"}</b><ChevronRight size={15}/></Link>)}
+                {artisans.slice(0,3).map((artisan)=><Link href={`/artisan/${artisan.id}`} key={artisan.id}><span className="hero-pro-avatar" style={{background:artisan.color}}>{artisan.avatarUrl?<img src={artisan.avatarUrl} alt=""/>:artisan.initials}</span><span><strong>{artisan.name}</strong><small>{artisan.trade} · {artisan.area}</small></span><b><Star size={11} fill="currentColor"/>{artisan.rating||"New"}</b><ChevronRight size={15}/></Link>)}
                 {!searching && !artisans.length && <div className="hero-market-empty"><ShieldCheck/><span><strong>No false availability</strong><small>We only show verified professionals when they are genuinely online.</small></span></div>}
                 {searching && <div className="hero-market-loading"><span/><span/><span/></div>}
               </div>
@@ -150,7 +163,7 @@ export function HomeClient() {
           <div className="section-heading"><div><span className="kicker">Top professionals</span><h2>Recommended near {area}</h2></div><div className="nearby"><LocateFixed size={16} /> Live availability</div></div>
           <div className="artisan-grid">
             {visible.map((artisan) => <Link href={`/artisan/${artisan.id}`} className={`artisan-card${artisan.featured ? " top-professional" : ""}`} key={artisan.id}>
-              <div className="artisan-photo artisan-solid" style={{ background: artisan.color }}><span className="artisan-initials">{artisan.initials}</span><div className="artisan-watermark">{artisan.trade}</div>{artisan.featured && <span className="top-badge">Top pro</span>}<span className="eta"><Clock3 size={13} /> {artisan.eta} away</span></div>
+              <div className="artisan-photo artisan-solid" style={{ background: artisan.color }}>{artisan.avatarUrl?<img src={artisan.avatarUrl} alt={`${artisan.name}, ${artisan.trade}`}/>:<span className="artisan-initials">{artisan.initials}</span>}<div className="artisan-watermark">{artisan.trade}</div>{artisan.featured && <span className="top-badge">Top pro</span>}<span className="eta"><Clock3 size={13} /> {artisan.eta} away</span></div>
               <div className="artisan-body">
                 <div className="artisan-title"><div><h3>{artisan.name} {artisan.verified && <BadgeCheck size={17} fill="#147d64" />}</h3><p>{artisan.trade} · {artisan.area}</p></div><span className="artisan-rating"><Star size={14} fill="currentColor" /> {artisan.rating}</span></div>
                 <div className="skill-list">{artisan.skills.slice(0, 2).map((skill) => <span key={skill}>{skill}</span>)}</div>
@@ -192,7 +205,7 @@ export function HomeClient() {
             <p>Trusted work. Stronger neighbourhoods. Book verified artisans across Nairobi with confidence.</p>
             <Link className="button button-dark" href="/post-job">Post a job <ArrowRight size={16} /></Link>
           </div>
-          <div className="footer-column"><strong>Marketplace</strong><Link href="/#services">Find a fundi</Link><Link href="/map">Explore the map</Link><Link href="/post-job">Post a job</Link></div>
+          <div className="footer-column"><strong>Marketplace</strong><Link href="/artisans">Find a fundi</Link><Link href="/map">Explore the map</Link><Link href="/post-job">Post a job</Link></div>
           <div className="footer-column"><strong>For artisans</strong><Link href="/join">Join Mafundi</Link><Link href="/artisan/login">Artisan sign in</Link></div>
           <div className="footer-column footer-contact"><strong>Talk to us</strong><a href="mailto:info@mafundimtaani.co.ke"><Mail size={15} />info@mafundimtaani.co.ke</a><a href="tel:+254720898678"><Phone size={15} />+254 720 898678</a><span>Nairobi, Kenya</span></div>
         </div>
