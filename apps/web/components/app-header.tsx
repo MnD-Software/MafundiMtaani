@@ -29,6 +29,9 @@ export function AppHeader() {
       {!role && <Link href="/join" onClick={() => setOpen(false)}>{sw?"Kuwa fundi":"Become an artisan"}</Link>}
       {role === "artisan" && <Link href="/artisan/dashboard" onClick={() => setOpen(false)}>{sw?"Kazi zangu":"My jobs"}</Link>}
       {["admin","support"].includes(role || "") && <Link href="/admin" onClick={() => setOpen(false)}>{sw?"Operesheni":"Operations"}</Link>}
+      <div className="nav-menu-actions">
+        {!role ? <><Link href="/login" onClick={() => setOpen(false)}>{sw?"Ingia":"Sign in"}</Link><Link href="/register" onClick={() => setOpen(false)}>{sw?"Jisajili":"Sign up"}</Link><Link className="menu-primary-action" href="/post-job" onClick={() => setOpen(false)}>{sw?"Weka kazi":"Post a job"}</Link></>:<Link href={role==="artisan"?"/artisan/dashboard":(["admin","support"].includes(role)?"/admin":"/client/dashboard")} onClick={() => setOpen(false)}>{sw?"Akaunti":"My account"}</Link>}
+      </div>
     </nav>
     <button className={`header-live-location ${live.state==="live"?"active":""}`} type="button" onClick={live.start} aria-label="Use my live location">
       <Navigation size={15}/>

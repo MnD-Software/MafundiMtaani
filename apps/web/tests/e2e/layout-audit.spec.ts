@@ -60,10 +60,12 @@ test("homepage remains composed through the sticky-search transition", async ({
 
   if (isMobile) {
     await expect(page.locator(".mobile-app-nav")).toBeVisible();
+    await expect(page.locator(".mobile-menu-button")).toBeVisible();
     await expect(page.locator(".header-live-location .location-compact")).toHaveText(
       "Near me",
     );
   } else {
-    await expect(page.locator(".dock-navigation")).toBeVisible();
+    await expect(page.locator(".site-header>nav")).toBeHidden();
+    await expect(page.locator(".mobile-menu-button")).toBeVisible();
   }
 });

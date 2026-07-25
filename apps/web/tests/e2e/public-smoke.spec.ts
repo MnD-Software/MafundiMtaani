@@ -22,9 +22,16 @@ test("mobile menu exposes the complete brand and navigation",async({page,isMobil
   await expect(page.getByText("Mafundi Mtaani",{exact:false}).first()).toBeVisible();
   const toggle=page.locator(".mobile-menu-button");
   await toggle.click();
-  await expect(page.getByRole("link",{name:"Services",exact:true})).toBeVisible();
-  await expect(page.locator(".site-header nav")).toHaveCSS("z-index","70");
+  const menuNav=page.locator(".site-header nav");
+  await expect(menuNav.getByRole("link",{name:"Services",exact:true})).toBeVisible();
+  await expect(menuNav.getByRole("link",{name:"Sign in",exact:true})).toBeVisible();
+  await expect(menuNav).toHaveCSS("z-index","70");
   await expect(toggle).toHaveAttribute("aria-expanded","true");
+  const menu=await menuNav.boundingBox();
+  const viewport=page.viewportSize();
+  expect(menu).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(menu!.width).toBeGreaterThanOrEqual(viewport!.width-1);
 });
 
 test("role portals stay separated",async({page})=>{
