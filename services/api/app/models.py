@@ -187,6 +187,37 @@ class ArtisanEarning(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class BusinessOrganization(Base):
+    __tablename__ = "business_organizations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    owner_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    monthly_budget: Mapped[float] = mapped_column(Float, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OrganizationMember(Base):
+    __tablename__ = "organization_members"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("business_organizations.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(30), default="requester")
+    spending_limit: Mapped[float] = mapped_column(Float, default=0)
+
+
+class IntegrationOutbox(Base):
+    __tablename__ = "integration_outbox"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    destination: Mapped[str] = mapped_column(String(40), default="erpnext", index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    resource_id: Mapped[str] = mapped_column(String(36), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class PaymentStatus(str, Enum):
     pending = "pending"
     held = "held"

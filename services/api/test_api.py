@@ -181,3 +181,7 @@ def test_property_care_support_and_sla_workflows():
         assert client.get("/v1/support-tickets",headers=headers).json()[0]["reference"].startswith("SUP-")
         admin=create_admin()
         assert client.get("/v1/support-tickets",headers={"Authorization":f"Bearer {admin}"}).status_code==200
+        organization=client.post("/v1/organizations",headers=headers,json={"name":"Nairobi Property Team","monthly_budget":100000});assert organization.status_code==201
+        assistance=client.post("/v1/assist/job",headers=headers,json={"description":"Urgent leaking kitchen pipe flooding the cabinet","area":"Kilimani"});assert assistance.status_code==200
+        assert assistance.json()["suggested_trade"]=="Plumbing"
+        assert client.post("/v1/admin/integrations/erpnext/sync",headers={"Authorization":f"Bearer {admin}"}).status_code==503

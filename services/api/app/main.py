@@ -18,7 +18,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, Campaign, CompletionApproval, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, SupportTicket, User, UserRole, WarrantyClaim
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, BusinessOrganization, Campaign, CompletionApproval, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, OrganizationMember, PaymentMethod, PaymentStatus, PaymentTransaction, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, Subscription, SupportTicket, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -571,6 +571,76 @@ def artisan_earnings(db:Session=Depends(get_db),user:User=Depends(require_roles(
     return {"total":sum(item.amount for item in rows if item.status=="paid"),"pending":sum(item.amount for item in rows if item.status=="pending"),"items":[{"id":item.id,"type":item.earning_type,"amount":item.amount,"status":item.status} for item in rows]}
 
 
+class OrganizationCreate(BaseModel):
+    name:str=Field(min_length=2,max_length=180)
+    monthly_budget:float=Field(default=0,ge=0)
+
+
+@app.post("/v1/organizations",status_code=201)
+def create_organization(data:OrganizationCreate,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
+    item=BusinessOrganization(owner_user_id=user.id,**data.model_dump());db.add(item);db.flush();db.add(OrganizationMember(organization_id=item.id,user_id=user.id,role="owner",spending_limit=data.monthly_budget));db.commit();db.refresh(item)
+    return {"id":item.id,"name":item.name}
+
+
+class MemberCreate(BaseModel):
+    email:str
+    role:str=Field(default="requester",pattern="^(admin|approver|requester|viewer)$")
+    spending_limit:float=Field(default=0,ge=0)
+
+
+@app.post("/v1/organizations/{organization_id}/members",status_code=201)
+def add_organization_member(organization_id:str,data:MemberCreate,db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> dict:
+    organization=db.get(BusinessOrganization,organization_id)
+    if not organization or organization.owner_user_id!=user.id: raise HTTPException(404,"Organization not found")
+    member_user=db.scalar(select(User).where(User.email==data.email.lower().strip()))
+    if not member_user: raise HTTPException(404,"Invitee must create an account first")
+    item=OrganizationMember(organization_id=organization.id,user_id=member_user.id,role=data.role,spending_limit=data.spending_limit);db.add(item);db.commit();db.refresh(item)
+    return {"id":item.id,"role":item.role}
+
+
+class JobAssistRequest(BaseModel):
+    description:str=Field(min_length=5,max_length=4000)
+    area:str=Field(default="",max_length=100)
+
+
+@app.post("/v1/assist/job")
+def assist_job(data:JobAssistRequest,_:User=Depends(require_roles(UserRole.client,UserRole.estate_manager))) -> dict:
+    text=data.description.lower()
+    rules=[("Plumbing",["leak","tap","pipe","toilet","sink"]),("Electrical",["power","socket","wire","light","breaker"]),("Carpentry",["door","cabinet","wood","shelf"]),("Painting",["paint","wall","ceiling"]),("Appliance repair",["fridge","washer","oven","appliance"])]
+    trade=next((name for name,words in rules if any(word in text for word in words)),"General maintenance")
+    urgency="today" if any(word in text for word in ["urgent","flood","sparking","danger"]) else "this_week"
+    return {"suggested_trade":trade,"suggested_title":f"{trade} help needed","suggested_urgency":urgency,"safety_note":"Switch off affected utilities if it is safe to do so." if urgency=="today" else "Add clear photos and access instructions for more accurate quotes.","source":"rules","requires_professional_confirmation":True}
+
+
+@app.post("/v1/jobs/{job_id}/masked-call")
+async def create_masked_call(job_id:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)) -> dict:
+    job=db.get(Job,job_id)
+    if not job: raise HTTPException(404,"Job not found")
+    require_job_access(job,db,user)
+    if not settings.masked_call_provider_url or not settings.masked_call_provider_token: return {"status":"not_configured","fallback":"Use protected job-room messaging"}
+    artisan=db.get(Artisan,job.assigned_artisan_id) if job.assigned_artisan_id else None
+    other_phone=artisan.phone if user.id==job.client_user_id and artisan else job.client_phone
+    async with httpx.AsyncClient(timeout=15) as client:
+        response=await client.post(settings.masked_call_provider_url,headers={"Authorization":f"Bearer {settings.masked_call_provider_token}"},json={"caller":user.phone,"recipient":other_phone,"reference":job.reference})
+    if not response.is_success: raise HTTPException(502,"Masked call provider failed")
+    return {"status":"ready","session":response.json()}
+
+
+@app.post("/v1/admin/integrations/erpnext/sync")
+async def sync_erpnext(db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.admin))) -> dict:
+    if not all([settings.erpnext_url,settings.erpnext_api_key,settings.erpnext_api_secret]): raise HTTPException(503,"ERPNext is not configured")
+    pending=db.scalars(select(IntegrationOutbox).where(IntegrationOutbox.destination=="erpnext",IntegrationOutbox.status=="pending").limit(50)).all()
+    synced=0
+    async with httpx.AsyncClient(timeout=20) as client:
+        for item in pending:
+            item.attempts+=1
+            response=await client.post(f"{settings.erpnext_url.rstrip('/')}/api/resource/Mafundi Marketplace Event",headers={"Authorization":f"token {settings.erpnext_api_key}:{settings.erpnext_api_secret}"},json={"event_type":item.event_type,"resource_id":item.resource_id,"payload_json":item.payload})
+            item.status="synced" if response.is_success else "failed"
+            if response.is_success: synced+=1
+    audit(db,user.id,"erpnext.sync","integration",metadata={"synced":synced,"attempted":len(pending)});db.commit()
+    return {"attempted":len(pending),"synced":synced}
+
+
 @app.post("/v1/jobs/{job_id}/messages", status_code=201)
 def send_message(job_id: str, data: MessageCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     job = db.get(Job, job_id)
@@ -611,6 +681,7 @@ def update_job_status(job_id: str, next_status: JobStatus, db: Session = Depends
         raise HTTPException(409, "Invalid job status transition")
     job.status = next_status
     if next_status == JobStatus.completed:
+        db.add(IntegrationOutbox(event_type="job.completed",resource_id=job.id,payload={"reference":job.reference,"trade":job.trade,"area":job.area}))
         referral=db.scalar(select(Referral).where(Referral.referred_user_id==job.client_user_id,Referral.status=="qualified"))
         if referral:
             referral.status="rewarded"

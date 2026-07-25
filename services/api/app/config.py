@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     web_push_public_key: str = ""
     web_push_private_key: str = ""
     verification_webhook_secret: str = ""
+    erpnext_url: str = ""
+    erpnext_api_key: str = ""
+    erpnext_api_secret: str = ""
+    masked_call_provider_url: str = ""
+    masked_call_provider_token: str = ""
     platform_fee_rate: float = 0.10
     tax_rate: float = 0.0
     # Ignore retired bootstrap-only variables that may still exist in a host's
