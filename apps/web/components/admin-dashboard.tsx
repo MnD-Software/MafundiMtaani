@@ -140,6 +140,7 @@ export function AdminDashboard({
     ["coverage", "Coverage map", MapPinned],
     ["finance", "Revenue & payouts", CircleDollarSign],
     ["campaigns", "Campaigns", CalendarDays],
+    ["support", "Support & warranties", Bell],
     ["risk", "Trust & fraud", ShieldCheck],
   ] as const;
 
@@ -561,6 +562,7 @@ export function AdminDashboard({
         )}
         {section === "campaigns" && <CampaignCentre notify={notify} />}
         {section === "risk" && <RiskCentre />}
+        {section === "support" && <SupportCentre />}
       </section>
     </main>
   );
@@ -775,6 +777,12 @@ function AnalyticsCard({
       )}
     </section>
   );
+}
+
+function SupportCentre(){
+  const[tickets,setTickets]=useState<{id:string;reference:string;subject:string;priority:string;status:string;overdue:boolean}[]>([]);const[claims,setClaims]=useState<{id:string;job_id:string;reason:string;status:string}[]>([]);
+  useEffect(()=>{void Promise.all([fetch("/api/marketplace/support-tickets"),fetch("/api/marketplace/admin/warranty-claims")]).then(async([a,b])=>{if(a.ok)setTickets(await a.json());if(b.ok)setClaims(await b.json())})},[]);
+  return <section className="ops-data-page"><div className="ops-metrics"><Metric label="Open tickets" value={tickets.filter(item=>item.status==="open").length} note="Service queue"/><Metric label="SLA overdue" value={tickets.filter(item=>item.overdue).length} note="Immediate action"/><Metric label="Warranty claims" value={claims.length} note="90-day cover"/><Metric label="Urgent" value={tickets.filter(item=>item.priority==="urgent").length} note="Two-hour SLA"/></div><div className="ops-grid"><section className="analytics-card compliance-list"><span className="kicker">Service desk</span><h2>SLA queue</h2>{tickets.length?tickets.map(item=><article key={item.id}><strong>{item.reference} · {item.subject}</strong><span>{item.priority} · {item.overdue?"OVERDUE":item.status}</span></article>):<p>No tickets.</p>}</section><section className="analytics-card compliance-list"><span className="kicker">Workmanship cover</span><h2>Warranty claims</h2>{claims.length?claims.map(item=><article key={item.id}><strong>{item.reason}</strong><span>{item.status} · job {item.job_id.slice(0,8)}</span></article>):<p>No warranty claims.</p>}</section></div></section>
 }
 
 function RiskCentre() {

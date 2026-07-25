@@ -90,6 +90,7 @@ export function DashboardClient({
     ["jobs", artisanMode ? "Job requests" : "My jobs", BriefcaseBusiness],
     ["messages", "Messages", MessageSquare],
     ["earnings", artisanMode ? "Earnings" : "Payments", CircleDollarSign],
+    ["care", artisanMode ? "Support" : "Property care", MapPin],
     ["reviews", "Reviews", Star],
   ] as const;
   const completed = jobs.filter((job) => job.status === "completed").length;
@@ -289,6 +290,7 @@ export function DashboardClient({
             text="Only reviews connected to completed jobs are published."
           />
         )}
+        {section === "care" && <CareAndSupport artisanMode={artisanMode}/>}
         {section === "schedule" && <SchedulePanel />}
         {section === "profile" && (
           <ProfileEditor
@@ -300,6 +302,17 @@ export function DashboardClient({
       </section>
     </main>
   );
+}
+
+function CareAndSupport({artisanMode}:{artisanMode:boolean}){
+  type PropertyItem={id:string;name:string;area:string;property_type:string};
+  type Ticket={id:string;reference:string;subject:string;priority:string;status:string;sla_due_at:string};
+  const[properties,setProperties]=useState<PropertyItem[]>([]);const[tickets,setTickets]=useState<Ticket[]>([]);const[earnings,setEarnings]=useState<{total:number;pending:number}|null>(null);const[notice,setNotice]=useState("");
+  const load=()=>void Promise.all([artisanMode?Promise.resolve(null):fetch("/api/marketplace/properties"),fetch("/api/marketplace/support-tickets"),artisanMode?fetch("/api/marketplace/artisan/earnings"):Promise.resolve(null)]).then(async([a,b,c])=>{if(a&&a.ok)setProperties(await a.json());if(b.ok)setTickets(await b.json());if(c&&c.ok)setEarnings(await c.json())});
+  useEffect(load,[artisanMode]);
+  const addProperty=async()=>{const name=window.prompt("Property name");const area=window.prompt("Nairobi estate","Kilimani");if(!name||!area)return;const response=await fetch("/api/marketplace/properties",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,area,property_type:"home",address:"",notes:""})});setNotice(response.ok?"Property added.":(await response.json()).detail);load()};
+  const ticket=async()=>{const subject=window.prompt("What do you need help with?");const details=window.prompt("Describe the issue");if(!subject||!details)return;const response=await fetch("/api/marketplace/support-tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subject,details,priority:"normal"})});setNotice(response.ok?"Support ticket opened.":(await response.json()).detail);load()};
+  return <section className="dash-panel-page"><span className="kicker">{artisanMode?"Earnings assistance":"Homes & support"}</span><h2>{artisanMode?"Support and bonus ledger":"Property care made simple"}</h2>{notice&&<p className="form-success">{notice}</p>}{artisanMode&&<div className="dashboard-finance-grid"><article><span>Paid tips & bonuses</span><strong>KSh {(earnings?.total||0).toLocaleString()}</strong></article><article><span>Pending</span><strong>KSh {(earnings?.pending||0).toLocaleString()}</strong></article></div>}{!artisanMode&&<><button className="button button-dark" onClick={()=>void addProperty()}>Add a property</button><div className="growth-grid">{properties.map(item=><article key={item.id}><small>{item.property_type}</small><strong>{item.name}</strong><p>{item.area}</p></article>)}</div></>}<div className="section-heading"><div><span className="kicker">Service desk</span><h2>Your support tickets</h2></div><button onClick={()=>void ticket()}>Open ticket</button></div>{tickets.length?tickets.map(item=><article className="dashboard-room-link" key={item.id}><span><strong>{item.subject}</strong><small>{item.reference} · {item.priority} · SLA {new Date(item.sla_due_at).toLocaleString()}</small></span><b>{item.status}</b></article>):<EmptyPanel title="No support tickets" text="Help requests and their SLA status appear here."/>}</section>
 }
 
 function SchedulePanel() {
