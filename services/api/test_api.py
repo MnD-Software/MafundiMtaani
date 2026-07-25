@@ -223,3 +223,26 @@ def test_property_care_support_and_sla_workflows():
         assistance=client.post("/v1/assist/job",headers=headers,json={"description":"Urgent leaking kitchen pipe flooding the cabinet","area":"Kilimani"});assert assistance.status_code==200
         assert assistance.json()["suggested_trade"]=="Plumbing"
         assert client.post("/v1/admin/integrations/erpnext/sync",headers={"Authorization":f"Bearer {admin}"}).status_code==503
+
+
+def test_discovery_preferences_and_safety_rbac():
+    with TestClient(app) as client:
+        token=register(client,"discovery-client@test.local")
+        headers={"Authorization":f"Bearer {token}"}
+        saved=client.post("/v1/saved-searches",headers=headers,json={"name":"Plumbers near home","query":"leaking tap","trade":"Plumbing","area":"Kilimani"})
+        assert saved.status_code==201
+        assert client.get("/v1/saved-searches",headers=headers).json()[0]["name"]=="Plumbers near home"
+        preferences=client.put("/v1/notification-preferences",headers=headers,json={"job_updates":True,"in_app":True,"offers":False,"email":True,"push":False})
+        assert preferences.status_code==200
+        assert preferences.json()["offers"] is False
+        alert=client.post("/v1/safety/sos",headers=headers,json={"latitude":-1.2921,"longitude":36.8219})
+        assert alert.status_code==201
+        assert client.get("/v1/admin/sos-alerts",headers=headers).status_code==403
+        admin=create_admin()
+        admin_headers={"Authorization":f"Bearer {admin}"}
+        alerts=client.get("/v1/admin/sos-alerts",headers=admin_headers)
+        assert alerts.status_code==200
+        assert any(item["id"]==alert.json()["id"] for item in alerts.json())
+        resolved=client.patch(f"/v1/admin/sos-alerts/{alert.json()['id']}",headers=admin_headers,json={"status":"resolved"})
+        assert resolved.status_code==200
+        assert resolved.json()["status"]=="resolved"

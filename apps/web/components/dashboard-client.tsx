@@ -12,6 +12,7 @@ import {
   KeyRound,
   MapPin,
   MessageSquare,
+  Search,
   ShieldCheck,
   Star,
   UserRound,
@@ -93,6 +94,7 @@ export function DashboardClient({
     ["overview", "Overview", LayoutDashboard],
     ["jobs", artisanMode ? "Job requests" : "My jobs", BriefcaseBusiness],
     ["messages", "Messages", MessageSquare],
+    ["notifications", "Notifications", Bell],
     ["earnings", artisanMode ? "Earnings" : "Payments", CircleDollarSign],
     ["care", artisanMode ? "Support" : "Property care", MapPin],
     ["reviews", "Reviews", Star],
@@ -145,13 +147,7 @@ export function DashboardClient({
           <div className="dash-head-actions">
             <button
               aria-label="Notifications"
-              onClick={() =>
-                notify(
-                  jobs.length
-                    ? `${jobs.length} authorized jobs loaded.`
-                    : "No new job alerts.",
-                )
-              }
+              onClick={() => setSection("notifications")}
             >
               <Bell size={19} />
               {jobs.length > 0 && <i />}
@@ -242,6 +238,7 @@ export function DashboardClient({
             )}
           </section>
         )}
+        {section === "notifications" && <NotificationCenter />}
         {section === "earnings" && (
           <section className="dash-panel-page">
             <span className="kicker">
@@ -311,6 +308,24 @@ export function DashboardClient({
       </section>
     </main>
   );
+}
+
+function NotificationCenter() {
+  type Alert = { id:string; title:string; body:string; read:boolean; created_at:string };
+  type Search = { id:string; name:string; query:string; trade:string; area:string };
+  type Preferences = { in_app:boolean; email:boolean; sms:boolean; push:boolean; job_updates:boolean; offers:boolean };
+  const [alerts,setAlerts]=useState<Alert[]>([]); const [searches,setSearches]=useState<Search[]>([]);
+  const [preferences,setPreferences]=useState<Preferences>({in_app:true,email:true,sms:false,push:false,job_updates:true,offers:false});
+  const load=async()=>{const[a,s,p]=await Promise.all([fetch("/api/marketplace/notifications"),fetch("/api/marketplace/saved-searches"),fetch("/api/marketplace/notification-preferences")]);if(a.ok)setAlerts(await a.json());if(s.ok)setSearches(await s.json());if(p.ok)setPreferences(await p.json())};
+  useEffect(()=>{void load()},[]);
+  const read=async(id:string)=>{await fetch(`/api/marketplace/notifications/${id}`,{method:"PATCH"});void load()};
+  const update=async(key:keyof Preferences,value:boolean)=>{const next={...preferences,[key]:value};setPreferences(next);await fetch("/api/marketplace/notification-preferences",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(next)})};
+  return <section className="dash-panel-page"><span className="kicker">Your attention centre</span><h2>Notifications</h2>
+    <div className="preference-strip">{(["in_app","email","job_updates","offers"] as const).map(key=><label key={key}><input type="checkbox" checked={preferences[key]} onChange={event=>void update(key,event.target.checked)}/>{key.replaceAll("_"," ")}</label>)}</div>
+    {alerts.length?alerts.map(item=><button className={`notification-row ${item.read?"":"unread"}`} key={item.id} onClick={()=>void read(item.id)}><span><strong>{item.title}</strong><small>{item.body}</small></span><time>{new Date(item.created_at).toLocaleString()}</time></button>):<EmptyPanel title="You are all caught up" text="Job, payment, safety and support updates appear here."/>}
+    <div className="section-heading"><div><span className="kicker">Discovery</span><h2>Saved searches</h2></div></div>
+    {searches.length?searches.map(item=><Link className="dashboard-room-link" key={item.id} href={`/?q=${encodeURIComponent(item.query||item.trade)}&area=${encodeURIComponent(item.area)}`}><span><strong>{item.name}</strong><small>{item.query||item.trade||"All services"} · {item.area||"Any area"}</small></span><Search size={16}/></Link>):<EmptyPanel title="No saved searches" text="Save useful combinations from marketplace search."/>}
+  </section>
 }
 
 function SecurityCenter() {
@@ -848,8 +863,18 @@ function ProfileEditor({
       <button onClick={() => void save()} className="button button-dark">
         Save profile
       </button>
+      {artisanMode && <PortfolioManager />}
     </section>
   );
+}
+
+function PortfolioManager(){
+  type Item={id:string;title:string;description:string;file_url:string};
+  const[items,setItems]=useState<Item[]>([]);const[artisanId,setArtisanId]=useState("");const[notice,setNotice]=useState("");
+  const load=async()=>{const profile=await fetch("/api/marketplace/artisans/me");if(!profile.ok)return;const artisan=await profile.json();setArtisanId(artisan.id);const response=await fetch(`/api/marketplace/artisans/${artisan.id}/portfolio`);if(response.ok)setItems(await response.json())};
+  useEffect(()=>{void load()},[]);
+  const add=async(file:File)=>{const title=window.prompt("Portfolio project title");if(!title)return;const description=window.prompt("Briefly describe the work")||"";const payload=new FormData();payload.set("file",file);payload.set("category","portfolio");const upload=await fetch("/api/marketplace/uploads",{method:"POST",body:payload});const data=await upload.json();if(!upload.ok)return setNotice(data.detail||"Upload failed.");const fileId=data.id;const response=await fetch("/api/marketplace/artisans/me/portfolio",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,description,file_url:`/api/public-files/${fileId}`})});setNotice(response.ok?"Portfolio project published.":"Project could not be published.");void load()};
+  return <div className="portfolio-manager"><div className="section-heading"><div><span className="kicker">Proof of craft</span><h2>Portfolio</h2></div><label className="button button-outline">Add project<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>{const file=event.target.files?.[0];if(file)void add(file)}}/></label></div>{notice&&<p className="form-success">{notice}</p>}<div className="portfolio-grid">{items.map(item=><article key={item.id}>{item.file_url&&<img src={item.file_url} alt=""/>}<strong>{item.title}</strong><p>{item.description}</p></article>)}</div>{!items.length&&artisanId&&<p>No portfolio projects yet.</p>}</div>
 }
 
 function PaymentMethods() {

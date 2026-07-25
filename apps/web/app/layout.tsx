@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Manrope } from "next/font/google";
 import { AppHeader } from "@/components/app-header";
 import { MobileNav } from "@/components/mobile-nav";
@@ -17,14 +17,15 @@ export const metadata: Metadata = {
   manifest:"/manifest.webmanifest",
   appleWebApp:{capable:true,title:"Mafundi"},
 };
+export const viewport:Viewport={width:"device-width",initialScale:1,viewportFit:"cover",themeColor:"#ffffff",colorScheme:"light"};
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={manrope.variable}><ExperienceProvider><LiveLocationProvider>
+      <body className={manrope.variable}><a className="skip-link" href="#main-content">Skip to main content</a><ExperienceProvider><LiveLocationProvider>
         <AppHeader />
         <SeasonalCampaign />
-        {children}
+        <div id="main-content">{children}</div>
         <MobileNav />
       </LiveLocationProvider></ExperienceProvider></body>
     </html>

@@ -18,6 +18,8 @@ export function JobForm() {
   const [files, setFiles] = useState<File[]>([]);
   const [form, setForm] = useState({ trade: "Plumbing", title: "", description: "", area: "Kilimani", urgency: "today", budgetMin: "", budgetMax: "", name: "", phone: "" });
   const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  useEffect(()=>{try{const draft=localStorage.getItem("mafundi-job-draft");if(draft){const parsed=JSON.parse(draft);setForm(current=>({...current,...parsed.form}));setStep(Math.min(2,Math.max(0,parsed.step||0)))}}catch{/* Ignore damaged local drafts. */}},[]);
+  useEffect(()=>{if(!submitted)localStorage.setItem("mafundi-job-draft",JSON.stringify({form,step,updatedAt:new Date().toISOString()}))},[form,step,submitted]);
   useEffect(() => { if (live.area) setForm((current) => ({ ...current, area:live.area! })); }, [live.area]);
   const submitJob = async () => {
     setSending(true); setError("");
@@ -36,7 +38,7 @@ export function JobForm() {
         const evidence = await fetch(`/api/marketplace/jobs/${data.id}/evidence`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: "before", file_url: uploadData.url, caption: file.name }) });
         if (!evidence.ok) throw new Error("The job was created, but one attachment could not be linked.");
       }
-      setReference(data.reference); setSubmitted(true);
+      setReference(data.reference); setSubmitted(true); localStorage.removeItem("mafundi-job-draft");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The service is temporarily unavailable."); }
     finally { setSending(false); }
   };

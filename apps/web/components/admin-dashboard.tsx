@@ -786,6 +786,8 @@ function SupportCentre(){
 }
 
 function RiskCentre() {
+  const [sos,setSos]=useState<{id:string;user_name:string;user_phone:string;status:string;created_at:string;latitude:number|null;longitude:number|null}[]>([]);
+  const [auditRows,setAuditRows]=useState<{id:string;action:string;resource_type:string;occurred_at:string}[]>([]);
   const [risks, setRisks] = useState<
     {
       id: string;
@@ -814,10 +816,14 @@ function RiskCentre() {
       fetch("/api/marketplace/admin/risk-signals"),
       fetch("/api/marketplace/admin/document-verifications"),
       fetch("/api/marketplace/admin/reconciliation"),
-    ]).then(async ([a, b, c]) => {
+      fetch("/api/marketplace/admin/sos-alerts"),
+      fetch("/api/marketplace/admin/audit-logs?limit=20"),
+    ]).then(async ([a, b, c,d,e]) => {
       if (a.ok) setRisks(await a.json());
       if (b.ok) setDocuments(await b.json());
       if (c.ok) setRecon(await c.json());
+      if (d.ok) setSos(await d.json());
+      if (e.ok) setAuditRows(await e.json());
     });
   }, []);
   return (
@@ -828,6 +834,7 @@ function RiskCentre() {
           value={risks.filter((item) => item.status === "open").length}
           note="Rule-based detection"
         />
+        <Metric label="Open safety alerts" value={sos.filter(item=>item.status==="open").length} note="Immediate review"/>
         <Metric
           label="Pending documents"
           value={documents.filter((item) => item.status === "pending").length}
@@ -878,6 +885,10 @@ function RiskCentre() {
             <p>No document records.</p>
           )}
         </section>
+      </div>
+      <div className="ops-grid">
+        <section className="analytics-card compliance-list"><span className="kicker">Safety operations</span><h2>SOS alerts</h2>{sos.length?sos.map(item=><article key={item.id}><strong>{item.user_name} · {item.user_phone||"No phone"}</strong><span>{item.status} · {new Date(item.created_at).toLocaleString()}</span>{item.status==="open"&&<button onClick={()=>void fetch(`/api/marketplace/admin/sos-alerts/${item.id}`,{method:"PATCH"}).then(()=>setSos(current=>current.map(row=>row.id===item.id?{...row,status:"resolved"}:row)))}>Resolve</button>}</article>):<p>No safety alerts.</p>}</section>
+        <section className="analytics-card compliance-list"><span className="kicker">Accountability</span><h2>Audit trail</h2>{auditRows.map(item=><article key={item.id}><strong>{item.action.replaceAll("."," ")}</strong><span>{item.resource_type} · {new Date(item.occurred_at).toLocaleString()}</span></article>)}</section>
       </div>
     </section>
   );

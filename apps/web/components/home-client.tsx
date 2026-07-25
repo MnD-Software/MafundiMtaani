@@ -20,6 +20,7 @@ export function HomeClient() {
   const [searching, setSearching] = useState(true);
   const [searchDocked, setSearchDocked] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [saveNotice,setSaveNotice]=useState("");
   const searchRef = useRef<HTMLFormElement>(null);
   useEffect(() => { if (live.area) setArea(live.area); }, [live.area]);
   useEffect(() => {
@@ -63,6 +64,7 @@ export function HomeClient() {
     setSearched(true);
     setSearchOpen(true);
   };
+  const saveSearch=async()=>{const response=await fetch("/api/marketplace/saved-searches",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:`${active==="All"?(query||"Help"):active} in ${area}`,query,trade:active==="All"?"":active,area})});setSaveNotice(response.ok?"Search saved to your account.":response.status===401?"Sign in to save this search.":"Search could not be saved.");window.setTimeout(()=>setSaveNotice(""),2500)};
   const predictiveResults = (compact = false) => (
     <div className={`predictive-results ${compact ? "compact" : ""}`}>
       <div className="predictive-heading"><strong>Search Mafundi</strong><span>{searching ? "Checking live availability…" : `${artisans.length} live matches`}</span></div>
@@ -107,6 +109,7 @@ export function HomeClient() {
               {searchOpen && predictiveResults()}
             </form>
             <button className={`hero-live-location ${live.state==="live"?"active":""}`} type="button" onClick={live.start}><Navigation size={14}/>{live.state==="live"?`Using live area: ${live.area}`:live.state==="locating"?"Finding your area…":"Use my current location"}</button>
+            <button className="save-search-button" type="button" onClick={()=>void saveSearch()}>Save this search</button>{saveNotice&&<span className="save-search-notice">{saveNotice}</span>}
             {searched && <p className="search-note">Live predictive results for {area} are shown above.</p>}
             <div className="trust-row">
               <span><ShieldCheck size={18} /> Background checked</span>

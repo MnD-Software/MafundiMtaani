@@ -23,7 +23,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .matching import score_match
-from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, AuthSession, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, OrganizationMember, PasskeyChallenge, PasskeyCredential, PaymentMethod, PaymentStatus, PaymentTransaction, PortfolioItem, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SOSAlert, StoredFile, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
+from .models import ApplicationStatus, Artisan, ArtisanApplication, ArtisanAvailability, ArtisanEarning, ArtisanInquiry, AuditLog, AuthSession, BusinessOrganization, Campaign, CompletionApproval, ConsentRecord, DeviceToken, Dispute, DisputeStatus, DocumentVerification, Favorite, IntegrationOutbox, Invoice, Job, JobEvidence, JobEvent, JobMessage, JobMilestone, JobStatus, JobTrackingPing, MaintenanceSchedule, MilestoneStatus, Notification, NotificationPreference, OrganizationMember, PasskeyChallenge, PasskeyCredential, PaymentMethod, PaymentStatus, PaymentTransaction, PortfolioItem, Promotion, Property, Quote, QuoteStatus, Referral, Review, RiskSignal, SavedSearch, SOSAlert, StoredFile, Subscription, SupportTicket, TrustedContact, User, UserRole, WarrantyClaim
 from .schemas import ApplicationCreate, ApplicationOut, ApplicationReview, ArtisanOut, JobCreate, JobOut, LoginRequest, MatchOut, RegisterRequest, TokenOut, UserOut
 
 NAIROBI_AREAS = {
@@ -90,6 +90,23 @@ def health() -> dict:
 def readiness(db:Session=Depends(get_db)) -> dict:
     db.execute(select(1))
     return {"status":"ready","database":"connected"}
+
+
+@app.get("/health/deep")
+def deep_health(db: Session = Depends(get_db)):
+    db.execute(select(1))
+    return {
+        "status":"healthy",
+        "database":"connected",
+        "environment":settings.environment,
+        "providers":{
+            "google":bool(settings.google_client_id),
+            "mpesa":all([settings.mpesa_consumer_key,settings.mpesa_consumer_secret,settings.mpesa_shortcode,settings.mpesa_passkey,settings.mpesa_callback_url]),
+            "sms":bool(settings.sms_api_key and settings.sms_username),
+            "erpnext":bool(settings.erpnext_url and settings.erpnext_api_key and settings.erpnext_api_secret),
+        },
+        "records":{"users":db.scalar(select(func.count(User.id))) or 0,"jobs":db.scalar(select(func.count(Job.id))) or 0,"artisans":db.scalar(select(func.count(Artisan.id))) or 0},
+    }
 
 
 def issue_token(user: User, db: Session, request: Request) -> str:
@@ -328,6 +345,14 @@ def download_private_file(file_id: str, db: Session = Depends(get_db), user: Use
         media_type=item.content_type,
         headers={"Content-Disposition": f'inline; filename="{item.filename.replace(chr(34), "")}"', "Cache-Control": "private, no-store"},
     )
+
+
+@app.get("/v1/public-files/{file_id}")
+def public_portfolio_file(file_id: str, db: Session = Depends(get_db)):
+    item = db.get(StoredFile, file_id)
+    if not item or item.category != "portfolio":
+        raise HTTPException(404, "File not found")
+    return Response(content=item.content, media_type=item.content_type, headers={"Cache-Control":"public, max-age=86400, immutable"})
 
 
 @app.get("/v1/estates")
@@ -903,6 +928,41 @@ def create_milestone(job_id: str, data: MilestoneCreate, db: Session = Depends(g
     return {"id":milestone.id,"title":milestone.title,"amount":milestone.amount,"status":milestone.status.value}
 
 
+class MilestoneTransition(BaseModel):
+    status: MilestoneStatus
+
+
+@app.patch("/v1/jobs/{job_id}/milestones/{milestone_id}")
+def transition_milestone(job_id: str, milestone_id: str, data: MilestoneTransition, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    job = authorized_job(db, job_id, user)
+    item = db.scalar(select(JobMilestone).where(JobMilestone.id == milestone_id, JobMilestone.job_id == job.id))
+    if not item:
+        raise HTTPException(404, "Milestone not found")
+    artisan = user_artisan(db, user) if user.role == UserRole.artisan else None
+    if data.status == MilestoneStatus.funded:
+        if job.client_user_id != user.id or item.status != MilestoneStatus.proposed:
+            raise HTTPException(403, "Only the client can fund a proposed milestone")
+        covered = db.scalar(select(func.sum(PaymentTransaction.amount)).where(PaymentTransaction.job_id == job.id, PaymentTransaction.status.in_([PaymentStatus.held, PaymentStatus.completed]))) or 0
+        if covered < item.amount:
+            raise HTTPException(409, "Record a confirmed payment before marking this milestone funded")
+    elif data.status == MilestoneStatus.submitted:
+        if not artisan or artisan.id != job.assigned_artisan_id or item.status != MilestoneStatus.funded:
+            raise HTTPException(403, "Only the assigned artisan can submit funded work")
+    elif data.status == MilestoneStatus.released:
+        if job.client_user_id != user.id or item.status != MilestoneStatus.submitted:
+            raise HTTPException(403, "Only the client can release submitted work")
+    elif data.status == MilestoneStatus.disputed:
+        if item.status not in {MilestoneStatus.funded, MilestoneStatus.submitted}:
+            raise HTTPException(409, "This milestone cannot be disputed")
+    else:
+        raise HTTPException(422, "Unsupported milestone transition")
+    item.status = data.status
+    db.add(JobEvent(job_id=job.id, event_type=f"milestone.{data.status.value}", actor_id=user.id, payload={"milestone_id":item.id}))
+    db.add(Notification(user_id=job.client_user_id if user.id != job.client_user_id else (db.get(Artisan, job.assigned_artisan_id).user_id if job.assigned_artisan_id else user.id), title=f"Milestone {data.status.value}", body=f"{item.title} is now {data.status.value}."))
+    db.commit()
+    return {"id":item.id,"status":item.status.value}
+
+
 @app.patch("/v1/jobs/{job_id}/status")
 def update_job_status(job_id: str, next_status: JobStatus, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     job = db.get(Job, job_id)
@@ -1050,6 +1110,64 @@ def add_portfolio_item(data: PortfolioCreate, db: Session = Depends(get_db), use
         raise HTTPException(403, "Approved artisan profile required")
     item = PortfolioItem(artisan_id=artisan.id, **data.model_dump())
     db.add(item); db.flush(); audit(db, user.id, "portfolio.created", "portfolio_item", item.id); db.commit(); db.refresh(item)
+    return item
+
+
+class SavedSearchCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    query: str = Field(default="", max_length=160)
+    trade: str = Field(default="", max_length=100)
+    area: str = Field(default="", max_length=100)
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    in_app: bool = True
+    email: bool = True
+    sms: bool = False
+    push: bool = False
+    job_updates: bool = True
+    offers: bool = False
+
+
+@app.get("/v1/saved-searches")
+def saved_searches(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return db.scalars(select(SavedSearch).where(SavedSearch.user_id == user.id).order_by(SavedSearch.created_at.desc())).all()
+
+
+@app.post("/v1/saved-searches", status_code=201)
+def save_search(data: SavedSearchCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if (db.scalar(select(func.count(SavedSearch.id)).where(SavedSearch.user_id == user.id)) or 0) >= 20:
+        raise HTTPException(422, "You can save up to 20 searches")
+    item = SavedSearch(user_id=user.id, **data.model_dump())
+    db.add(item); db.commit(); db.refresh(item)
+    return item
+
+
+@app.delete("/v1/saved-searches/{search_id}", status_code=204)
+def delete_saved_search(search_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = db.scalar(select(SavedSearch).where(SavedSearch.id == search_id, SavedSearch.user_id == user.id))
+    if not item:
+        raise HTTPException(404, "Saved search not found")
+    db.delete(item); db.commit()
+    return Response(status_code=204)
+
+
+@app.get("/v1/notification-preferences")
+def get_notification_preferences(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = db.scalar(select(NotificationPreference).where(NotificationPreference.user_id == user.id))
+    if not item:
+        item = NotificationPreference(user_id=user.id); db.add(item); db.commit(); db.refresh(item)
+    return item
+
+
+@app.put("/v1/notification-preferences")
+def set_notification_preferences(data: NotificationPreferencesUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = db.scalar(select(NotificationPreference).where(NotificationPreference.user_id == user.id))
+    if not item:
+        item = NotificationPreference(user_id=user.id); db.add(item)
+    for key, value in data.model_dump().items():
+        setattr(item, key, value)
+    db.commit(); db.refresh(item)
     return item
 
 
@@ -1469,6 +1587,21 @@ async def dispatch_notification(data: DispatchCreate, db: Session = Depends(get_
 def list_risk_signals(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> list[dict]:
     rows=db.scalars(select(RiskSignal).order_by(RiskSignal.created_at.desc()).limit(100)).all()
     return [{"id":row.id,"user_id":row.user_id,"job_id":row.job_id,"signal_type":row.signal_type,"severity":row.severity,"score":row.score,"details":row.details,"status":row.status,"created_at":row.created_at} for row in rows]
+
+
+@app.get("/v1/admin/sos-alerts")
+def admin_sos_alerts(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin, UserRole.support))):
+    rows = db.execute(select(SOSAlert, User).join(User, SOSAlert.user_id == User.id).order_by(SOSAlert.created_at.desc()).limit(100)).all()
+    return [{"id":alert.id,"user_name":user.name,"user_phone":user.phone,"job_id":alert.job_id,"latitude":alert.latitude,"longitude":alert.longitude,"status":alert.status,"created_at":alert.created_at} for alert,user in rows]
+
+
+@app.patch("/v1/admin/sos-alerts/{alert_id}")
+def resolve_sos_alert(alert_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.admin, UserRole.support))):
+    item = db.get(SOSAlert, alert_id)
+    if not item:
+        raise HTTPException(404, "Safety alert not found")
+    item.status = "resolved"; audit(db, user.id, "safety.sos_resolved", "sos_alert", item.id); db.commit()
+    return {"id":item.id,"status":item.status}
 
 
 @app.get("/v1/admin/document-verifications")

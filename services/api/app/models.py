@@ -435,6 +435,29 @@ class PortfolioItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class SavedSearch(Base):
+    __tablename__ = "saved_searches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    query: Mapped[str] = mapped_column(String(160), default="")
+    trade: Mapped[str] = mapped_column(String(100), default="")
+    area: Mapped[str] = mapped_column(String(100), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    in_app: Mapped[bool] = mapped_column(Boolean, default=True)
+    email: Mapped[bool] = mapped_column(Boolean, default=True)
+    sms: Mapped[bool] = mapped_column(Boolean, default=False)
+    push: Mapped[bool] = mapped_column(Boolean, default=False)
+    job_updates: Mapped[bool] = mapped_column(Boolean, default=True)
+    offers: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Promotion(Base):
     __tablename__ = "promotions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

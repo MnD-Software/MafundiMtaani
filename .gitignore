@@ -28,3 +28,5 @@ Thumbs.db
 *.log
 coverage/
 .coverage
+test-results/
+playwright-report/

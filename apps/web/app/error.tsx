@@ -1,0 +1,2 @@
+"use client";
+export default function ErrorPage({reset}:{error:Error&{digest?:string};reset:()=>void}){return <main className="auth-shell"><section className="auth-card centered"><span className="kicker">Something interrupted this page</span><h1>Let&apos;s try that again.</h1><p>Your account and submitted data are safe. Retry the page, or return to the marketplace if the problem continues.</p><button className="button button-dark button-wide" onClick={reset}>Retry</button></section></main>}
