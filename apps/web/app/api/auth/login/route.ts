@@ -8,10 +8,11 @@ export async function POST(request: Request) {
   const payload = await response.json();
   if (!response.ok) return NextResponse.json(payload, { status: response.status });
   const allowed:Record<string,string[]|undefined>={client:["client","estate_manager"],artisan:["artisan"],operations:["admin","support"]};
-  if(expectedRole&&(!allowed[expectedRole]||!allowed[expectedRole]!.includes(payload.user.role)))return NextResponse.json({detail:`Use the ${payload.user.role==="artisan"?"artisan":(["admin","support"].includes(payload.user.role)?"operations":"client")} sign-in portal for this account.`},{status:403});
+  if(expectedRole&&(!allowed[expectedRole]||!allowed[expectedRole]!.includes(payload.user.role)))return NextResponse.json({detail:"This account cannot use this sign-in page."},{status:403});
   const result = NextResponse.json({ user: payload.user });
   const secure = process.env.VERCEL_ENV === "production";
-  result.cookies.set("mafundi_session", payload.access_token, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: 3600 });
-  result.cookies.set("mafundi_role", payload.user.role, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: 3600 });
+  const month=60*60*24*30;
+  result.cookies.set("mafundi_session", payload.access_token, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: month });
+  result.cookies.set("mafundi_role", payload.user.role, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: month });
   return result;
 }

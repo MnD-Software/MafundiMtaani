@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     cors_origins: str = '["http://localhost:3000","http://127.0.0.1:3000"]'
     jwt_secret: str = "development-only-change-me"
     jwt_algorithm: str = "HS256"
-    access_token_minutes: int = 60
+    access_token_minutes: int = 43200
     mpesa_consumer_key: str = ""
     mpesa_consumer_secret: str = ""
     mpesa_shortcode: str = ""

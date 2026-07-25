@@ -11,6 +11,8 @@
 /* Production-safe responsive baseline. No retired artisan photography is loaded. */
 html,body{min-width:320px;max-width:100%;overflow-x:clip}
 img,svg{max-width:100%}
+html{-webkit-text-size-adjust:100%;text-rendering:optimizeLegibility}body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;background:#fff;color:#090b09}
+@media(min-resolution:2dppx){.artisan-card,.category-card,.analytics-card,.room-card{border-width:.5px}}
 .live-dot,.status-pulse{box-shadow:none!important}
 :where(a,button,input,select,textarea):focus-visible{outline:3px solid rgba(20,125,100,.34);outline-offset:3px}
 button,a{-webkit-tap-highlight-color:transparent;touch-action:manipulation}

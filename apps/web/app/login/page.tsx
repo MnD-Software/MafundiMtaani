@@ -1,2 +1,3 @@
-import Link from "next/link";
-export default function LoginPage(){return <main className="auth-shell"><section className="auth-card portal-picker"><span className="kicker">Choose your workspace</span><h1>Sign in to Mafundi.</h1><p>Each portal is isolated so you only see the tools intended for your role.</p><Link className="button button-dark button-wide" href="/client/login">Client sign in</Link><Link className="button button-outline button-wide" href="/artisan/login">Artisan sign in</Link><Link className="portal-operations" href="/operations/login">Operations team sign in</Link><p>New client? <Link href="/register">Create an account</Link></p></section></main>}
+import {Suspense} from "react";
+import {LoginForm} from "@/components/login-form";
+export default function LoginPage(){return <Suspense><LoginForm portal="client"/></Suspense>}

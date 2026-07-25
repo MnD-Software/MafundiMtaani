@@ -184,7 +184,7 @@ export function HomeClient() {
             <Link className="button button-dark" href="/post-job">Post a job <ArrowRight size={16} /></Link>
           </div>
           <div className="footer-column"><strong>Marketplace</strong><Link href="/#services">Find a fundi</Link><Link href="/map">Explore the map</Link><Link href="/post-job">Post a job</Link></div>
-          <div className="footer-column"><strong>For artisans</strong><Link href="/register">Join Mafundi</Link><Link href="/login">Artisan sign in</Link><Link href="/dashboard">Your dashboard</Link></div>
+          <div className="footer-column"><strong>For artisans</strong><Link href="/join">Join Mafundi</Link><Link href="/artisan/login">Artisan sign in</Link></div>
           <div className="footer-column footer-contact"><strong>Talk to us</strong><a href="mailto:info@mafundimtaani.co.ke"><Mail size={15} />info@mafundimtaani.co.ke</a><a href="tel:+254720898678"><Phone size={15} />+254 720 898678</a><span>Nairobi, Kenya</span></div>
         </div>
         <div className="footer-bottom"><span>© 2026 Mafundi Mtaani</span><nav><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><Link href="/refunds">Refunds</Link><Link href="/accessibility">Accessibility</Link></nav><span>Built for Nairobi&apos;s neighbourhoods.</span></div>
