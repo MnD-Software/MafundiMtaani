@@ -12,10 +12,10 @@ export function MobileNavClient({role}:{role:string|null}){
   const pathname=usePathname();const{language}=useExperience();const sw=language==="sw";
   const items:NavItem[]=role==="artisan"?[
     {...common.explore,label:sw?"Gundua":"Explore"},
-    {href:"/dashboard?section=jobs",label:sw?"Kazi":"Jobs",icon:BriefcaseBusiness,primary:false},
-    {href:"/dashboard",label:sw?"Fanya":"Work",icon:LayoutDashboard,primary:true},
-    {href:"/dashboard?section=schedule",label:sw?"Ratiba":"Schedule",icon:CalendarClock,primary:false},
-    {href:"/dashboard?section=profile",label:sw?"Wasifu":"Profile",icon:UserRound,primary:false},
+    {href:"/artisan/dashboard?section=jobs",label:sw?"Kazi":"Jobs",icon:BriefcaseBusiness,primary:false},
+    {href:"/artisan/dashboard",label:sw?"Fanya":"Work",icon:LayoutDashboard,primary:true},
+    {href:"/artisan/dashboard?section=schedule",label:sw?"Ratiba":"Schedule",icon:CalendarClock,primary:false},
+    {href:"/artisan/dashboard?section=profile",label:sw?"Wasifu":"Profile",icon:UserRound,primary:false},
   ]:["admin","support"].includes(role||"")?[
     {href:"/admin",label:"Overview",icon:LayoutDashboard,primary:false},
     {href:"/admin?section=artisans",label:"Approvals",icon:BadgeCheck,primary:false},
@@ -26,8 +26,8 @@ export function MobileNavClient({role}:{role:string|null}){
     {...common.explore,label:sw?"Gundua":"Explore"},
     {href:"/#services",label:sw?"Tafuta":"Search",icon:Search,primary:false},
     {href:"/post-job",label:sw?"Weka":"Post",icon:Plus,primary:true},
-    {href:"/dashboard?section=jobs",label:sw?"Kazi zangu":"My jobs",icon:BriefcaseBusiness,primary:false},
-    {href:"/dashboard",label:sw?"Akaunti":"Account",icon:UserRound,primary:false},
+    {href:"/client/dashboard?section=jobs",label:sw?"Kazi zangu":"My jobs",icon:BriefcaseBusiness,primary:false},
+    {href:"/client/dashboard",label:sw?"Akaunti":"Account",icon:UserRound,primary:false},
   ]:[
     {...common.explore,label:sw?"Gundua":"Explore"},
     {href:"/#services",label:sw?"Tafuta":"Search",icon:Search,primary:false},

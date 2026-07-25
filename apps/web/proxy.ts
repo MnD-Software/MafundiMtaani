@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 const roleRoutes: Array<[string, string[]]> = [
   ["/admin", ["admin", "support"]],
   ["/dashboard", ["client", "estate_manager", "artisan"]],
+  ["/client/dashboard", ["client","estate_manager"]],
+  ["/artisan/dashboard", ["artisan"]],
   ["/jobs", ["client", "estate_manager", "artisan", "admin", "support"]],
   ["/post-job", ["client", "estate_manager"]],
   ["/contact-artisan", ["client", "estate_manager"]],
@@ -14,7 +16,8 @@ export function proxy(request: NextRequest) {
   const rule = roleRoutes.find(([prefix]) => request.nextUrl.pathname.startsWith(prefix));
   if (!rule) return NextResponse.next();
   if (!session) {
-    const login = new URL("/login", request.url);
+    const portal=request.nextUrl.pathname.startsWith("/admin")?"/operations/login":request.nextUrl.pathname.startsWith("/artisan")?"/artisan/login":"/client/login";
+    const login = new URL(portal, request.url);
     login.searchParams.set("next", request.nextUrl.pathname);
     return NextResponse.redirect(login);
   }
@@ -22,4 +25,4 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/admin/:path*", "/dashboard/:path*", "/post-job/:path*", "/contact-artisan/:path*", "/jobs/:path*"] };
+export const config = { matcher: ["/admin/:path*", "/dashboard/:path*", "/client/dashboard/:path*", "/artisan/dashboard/:path*", "/post-job/:path*", "/contact-artisan/:path*", "/jobs/:path*"] };
