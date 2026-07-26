@@ -46,7 +46,7 @@ test("homepage remains composed through the sticky-search transition", async ({
 }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".hero")).toBeVisible();
-  await expect(page.locator(".hero-market-card")).toBeVisible();
+  await expect(page.locator(".hero-illustration")).toBeVisible();
 
   await page.evaluate(() => window.scrollTo({ top: 720, behavior: "instant" }));
   await expect(page.locator(".search-dock")).toBeVisible();
@@ -68,4 +68,18 @@ test("homepage remains composed through the sticky-search transition", async ({
     await expect(page.locator(".site-header>nav")).toBeHidden();
     await expect(page.locator(".mobile-menu-button")).toBeVisible();
   }
+
+  await page.locator(".mobile-menu-button").click();
+  await expect(page.locator(".site-header>nav")).toBeVisible();
+  await expect(page.locator(".menu-close-action")).toBeVisible();
+
+  const menu = await page.locator(".site-header>nav").boundingBox();
+  expect(menu).not.toBeNull();
+  expect(menu!.x).toBeGreaterThanOrEqual(0);
+  expect(menu!.y).toBeGreaterThanOrEqual(0);
+  expect(menu!.x + menu!.width).toBeLessThanOrEqual(viewport!.width + 1);
+  expect(menu!.y + menu!.height).toBeLessThanOrEqual(viewport!.height + 1);
+
+  await page.locator(".menu-close-action").click();
+  await expect(page.locator(".site-header>nav")).toBeHidden();
 });

@@ -107,7 +107,9 @@ body{background:#fff;color:#0a0c0a}
 .mobile-menu-button.open span:first-child{transform:translateY(3.25px) rotate(45deg)}
 .mobile-menu-button.open span:last-child{transform:translateY(-3.25px) rotate(-45deg)}
 .nav-menu-actions{display:none}
-.site-header.menu-open{background:#fff!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+.site-header.menu-open{z-index:120;background:#fff!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+.menu-close-action{display:none}
+body:has(.site-header.menu-open) .search-dock{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
 @media(max-width:760px){
   .site-header nav{display:flex!important;visibility:hidden;position:fixed!important;z-index:70;inset:72px 0 0!important;width:100vw!important;max-width:none!important;height:calc(100dvh - 72px);justify-self:stretch!important;align-self:stretch!important;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;border-radius:0!important;padding:24px 24px max(110px,calc(90px + env(safe-area-inset-bottom)))!important;background:#fff!important;box-shadow:none!important;flex-direction:column;gap:0!important;opacity:0;transform:translateY(-14px);clip-path:inset(0 0 100% 0);pointer-events:none;transition:opacity .22s ease,transform .4s cubic-bezier(.22,1,.36,1),clip-path .4s cubic-bezier(.22,1,.36,1),visibility 0s linear .4s}
   .site-header nav.open{visibility:visible;opacity:1;transform:none;clip-path:inset(0);pointer-events:auto;transition-delay:0s}
@@ -115,6 +117,7 @@ body{background:#fff;color:#0a0c0a}
   .site-header nav a:last-child{border-bottom:0!important}
   .nav-menu-actions{display:grid;margin-top:18px;padding-top:10px;border-top:1px solid #dfe3df}
   .site-header nav .menu-primary-action{margin-top:12px;padding:15px 18px!important;border:0!important;border-radius:14px;background:#0a0c0a;color:#fff!important;text-align:center}
+  .site-header nav .menu-close-action{display:flex;order:-1;align-items:center;justify-content:space-between;width:100%;padding:8px 4px 18px;margin-bottom:7px;border:0;border-bottom:1px solid #e8ebe7;background:#fff;color:#0a0c0a;font-size:12px;font-weight:800}
   .site-header.menu-open .header-live-location{opacity:0;pointer-events:none}
   .site-header.menu-open~.mobile-app-nav{opacity:0;pointer-events:none}
 }
@@ -282,10 +285,11 @@ body{background:#fff;color:#0a0c0a}
   body:has(.search-dock.visible) .site-header .mobile-menu-button{display:grid;grid-column:3;justify-self:end;z-index:76}
   body:has(.search-dock.visible) .search-dock{left:max(290px,19vw);right:130px;grid-template-columns:1fr}
   body:has(.search-dock.visible) .dock-navigation{display:none}
-  body:has(.search-dock.visible) .site-header>nav.open{display:flex;visibility:visible;position:fixed;z-index:75;top:78px;right:max(5vw,28px);left:auto;width:min(380px,calc(100vw - 40px));max-height:calc(100dvh - 98px);padding:18px;overflow-y:auto;flex-direction:column;align-items:stretch;gap:0;background:#fff;border:1px solid var(--line);border-radius:20px;box-shadow:0 24px 70px rgba(12,25,17,.18)}
+  body:has(.search-dock.visible) .site-header>nav.open{display:flex;visibility:visible;position:absolute;z-index:125;top:calc(100% + 10px);right:max(5vw,28px);left:auto;width:min(380px,calc(100vw - 40px));max-height:calc(100dvh - 108px);padding:18px;overflow-y:auto;overscroll-behavior:contain;flex-direction:column;align-items:stretch;gap:0;background:#fff;border:1px solid var(--line);border-radius:20px;box-shadow:0 24px 70px rgba(12,25,17,.18)}
   body:has(.search-dock.visible) .site-header>nav.open>a{padding:15px 8px;border-bottom:1px solid var(--line);font-size:18px}
   body:has(.search-dock.visible) .site-header>nav.open .nav-menu-actions{display:grid;margin-top:12px}
   body:has(.search-dock.visible) .site-header>nav.open .nav-menu-actions a{padding:13px 8px;border-bottom:1px solid var(--line)}
+  body:has(.search-dock.visible) .site-header>nav.open .menu-close-action{display:flex;order:-1;align-items:center;justify-content:space-between;padding:4px 8px 15px;margin-bottom:3px;border:0;border-bottom:1px solid var(--line);background:#fff;font-size:11px;font-weight:800}
 }
 .header-live-location small{font-size:8px}.header-live-location strong{font-size:10px}
 .hero{align-items:center}.hero-copy{width:100%}.hero-marketplace{width:100%}

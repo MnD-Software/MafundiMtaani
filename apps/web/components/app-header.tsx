@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { HardHat, Navigation } from "lucide-react";
+import { HardHat, Navigation, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useExperience } from "./experience-provider";
@@ -51,6 +51,7 @@ export function AppHeader() {
       {!role && <Link href="/join" onClick={() => setOpen(false)}>{sw?"Kuwa fundi":"Become an artisan"}</Link>}
       {role === "artisan" && <Link href="/artisan/dashboard" onClick={() => setOpen(false)}>{sw?"Kazi zangu":"My jobs"}</Link>}
       {["admin","support"].includes(role || "") && <Link href="/admin" onClick={() => setOpen(false)}>{sw?"Operesheni":"Operations"}</Link>}
+      <button className="menu-close-action" type="button" onClick={() => setOpen(false)}><X size={18}/><span>{sw?"Funga menyu":"Close menu"}</span></button>
       <div className="nav-menu-actions">
         {!role ? <><Link href="/login" onClick={() => setOpen(false)}>{sw?"Ingia":"Sign in"}</Link><Link href="/register" onClick={() => setOpen(false)}>{sw?"Jisajili":"Sign up"}</Link><Link className="menu-primary-action" href="/post-job" onClick={() => setOpen(false)}>{sw?"Weka kazi":"Post a job"}</Link></>:<Link href={role==="artisan"?"/artisan/dashboard":(["admin","support"].includes(role)?"/admin":"/client/dashboard")} onClick={() => setOpen(false)}>{sw?"Akaunti":"My account"}</Link>}
       </div>
