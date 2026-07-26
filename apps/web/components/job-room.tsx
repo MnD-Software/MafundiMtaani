@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, BadgeCheck, CheckCircle2, Clock3, MapPin, MessageSquare, Send, ShieldAlert, Star } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarClock, CheckCircle2, Clock3, MapPin, MessageSquare, Send, ShieldAlert, Star, XCircle } from "lucide-react";
 
 type Quote = {id:string;artisan_name:string;artisan_rating:number;amount:number;message:string;eta_hours:number;status:string};
 type Message = {id:string;sender_id:string;body:string;kind:string;created_at:string};
 type Milestone = {id:string;title:string;amount:number;status:string};
-type Room = {job:{id:string;reference:string;title:string;trade:string;area:string;status:string;assigned_artisan_id:string|null};quotes:Quote[];messages:Message[];milestones:Milestone[];dispute:null|{id:string;reason:string;status:string};viewer:{id:string;role:string};tracking:null|{latitude:number;longitude:number;accuracy_m:number;eta_minutes:number;recorded_at:string};evidence:{id:string;stage:string;file_url:string;caption:string;created_at:string}[];completion:null|{approved:boolean;note:string;approved_at:string|null}};
+type Room = {job:{id:string;reference:string;title:string;trade:string;area:string;status:string;assigned_artisan_id:string|null;scheduled_for:string|null};quotes:Quote[];messages:Message[];milestones:Milestone[];dispute:null|{id:string;reason:string;status:string};viewer:{id:string;role:string};tracking:null|{latitude:number;longitude:number;accuracy_m:number;eta_minutes:number;recorded_at:string};evidence:{id:string;stage:string;file_url:string;caption:string;created_at:string}[];completion:null|{approved:boolean;note:string;approved_at:string|null}};
 
 export function JobRoom({ jobId }:{jobId:string}) {
   const [room,setRoom] = useState<Room|null>(null);
@@ -37,6 +37,7 @@ export function JobRoom({ jobId }:{jobId:string}) {
   return <main className="room-shell">
     <Link className="back-link" href="/dashboard"><ArrowLeft size={16}/>Dashboard</Link>
     <header className="room-header"><div><span className="kicker">{room.job.reference} · {room.job.trade}</span><h1>{room.job.title}</h1><p><MapPin size={15}/>{room.job.area}<span className={`room-status ${room.job.status}`}>{room.job.status.replaceAll("_"," ")}</span></p></div><div className="room-trust"><BadgeCheck/><span><strong>Protected job room</strong><small>Quotes, messages and payments stay attached to this job.</small></span></div></header>
+    {!["completed","cancelled"].includes(room.job.status)&&<div className="job-control-strip"><span><CalendarClock/><strong>{room.job.scheduled_for?new Date(room.job.scheduled_for).toLocaleString():"Time not scheduled"}</strong></span><div><button onClick={()=>{const value=window.prompt("New date and time (YYYY-MM-DD HH:MM)");if(value){const date=new Date(value.replace(" ","T"));if(!Number.isNaN(date.getTime()))void act(`jobs/${jobId}/schedule`,"PATCH",{scheduled_for:date.toISOString()})}}}><CalendarClock/>Reschedule</button><button className="danger" onClick={()=>{if(window.confirm("Cancel this job? The action will be recorded in the job timeline."))void act(`jobs/${jobId}/cancel`,"POST")}}><XCircle/>Cancel job</button></div></div>}
     {notice && <div className="action-toast">{notice}</div>}{error && <p className="form-error">{error}</p>}
     <div className="room-grid">
       <section className="room-main">

@@ -170,6 +170,10 @@ def test_quote_job_room_tracking_and_verified_review():
         quote = client.post("/v1/quotes", headers={"Authorization":f"Bearer {artisan_token}"}, json={"job_id":job["id"],"amount":4500,"message":"Parts and labour included.","eta_hours":2})
         assert quote.status_code == 201
         assert client.post(f"/v1/quotes/{quote.json()['id']}/accept", headers={"Authorization":f"Bearer {client_token}"}).status_code == 200
+        scheduled_for = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        rescheduled = client.patch(f"/v1/jobs/{job['id']}/schedule", headers={"Authorization":f"Bearer {client_token}"}, json={"scheduled_for":scheduled_for})
+        assert rescheduled.status_code == 200
+        assert rescheduled.json()["scheduled_for"] is not None
         assert client.post(f"/v1/jobs/{job['id']}/messages", headers={"Authorization":f"Bearer {client_token}"}, json={"body":"Please call on arrival."}).status_code == 201
         assert client.patch(f"/v1/jobs/{job['id']}/status?next_status=in_progress", headers={"Authorization":f"Bearer {artisan_token}"}).status_code == 200
         assert client.post(f"/v1/jobs/{job['id']}/tracking",headers={"Authorization":f"Bearer {artisan_token}"},json={"latitude":-1.2921,"longitude":36.8219,"accuracy_m":12,"eta_minutes":8}).status_code==201
@@ -180,6 +184,20 @@ def test_quote_job_room_tracking_and_verified_review():
         review = client.post(f"/v1/jobs/{job['id']}/reviews", headers={"Authorization":f"Bearer {client_token}"}, json={"rating":5,"comment":"Excellent verified work."})
         assert review.status_code == 201
         assert review.json()["verified"] is True
+        artisan_reviews = client.get("/v1/reviews/me", headers={"Authorization":f"Bearer {artisan_token}"})
+        assert artisan_reviews.status_code == 200
+        assert artisan_reviews.json()["average"] == 5
+        assert artisan_reviews.json()["items"][0]["reply"] == ""
+        reply = client.post(f"/v1/reviews/{review.json()['id']}/reply", headers={"Authorization":f"Bearer {artisan_token}"}, json={"body":"Thank you for trusting my work."})
+        assert reply.status_code == 201
+        assert client.post(f"/v1/reviews/{review.json()['id']}/reply", headers={"Authorization":f"Bearer {artisan_token}"}, json={"body":"A duplicate reply."}).status_code == 409
+        assert client.get("/v1/reviews/me", headers={"Authorization":f"Bearer {client_token}"}).json()["items"][0]["reply"] == "Thank you for trusting my work."
+        cancellable = client.post("/v1/jobs", headers={"Authorization":f"Bearer {client_token}"}, json={"client_name":"Workflow Client","client_phone":"+254700111222","trade":"Electrical","title":"Inspect a wall socket","description":"Please inspect a wall socket before any repair work begins.","area":"Kilimani","urgency":"this_week","budget_min":1000,"budget_max":3000}).json()
+        assert client.post(f"/v1/jobs/{cancellable['id']}/cancel", headers={"Authorization":f"Bearer {artisan_token}"}).status_code == 403
+        cancelled = client.post(f"/v1/jobs/{cancellable['id']}/cancel", headers={"Authorization":f"Bearer {client_token}"})
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
+        assert client.post(f"/v1/jobs/{cancellable['id']}/cancel", headers={"Authorization":f"Bearer {client_token}"}).status_code == 409
         dispute = client.post(f"/v1/jobs/{job['id']}/disputes", headers={"Authorization":f"Bearer {client_token}"}, json={"reason":"Receipt question","details":"I need operations to verify the final receipt.","evidence":[]})
         assert dispute.status_code == 201
         disputes = client.get("/v1/admin/disputes", headers={"Authorization":f"Bearer {admin_token}"})
@@ -215,6 +233,11 @@ def test_growth_billing_devices_and_risk_controls():
         signals = client.get("/v1/admin/risk-signals", headers={"Authorization":f"Bearer {admin_token}"})
         assert signals.status_code == 200
         assert any(item["signal_type"] == "high_value_job" for item in signals.json())
+        signal = next(item for item in signals.json() if item["signal_type"] == "high_value_job")
+        assert client.patch(f"/v1/admin/risk-signals/{signal['id']}", headers={"Authorization":f"Bearer {client_token}"}, json={"status":"resolved"}).status_code == 403
+        reviewed_signal = client.patch(f"/v1/admin/risk-signals/{signal['id']}", headers={"Authorization":f"Bearer {admin_token}"}, json={"status":"investigating"})
+        assert reviewed_signal.status_code == 200
+        assert reviewed_signal.json()["status"] == "investigating"
         method = client.post("/v1/payment-methods", headers={"Authorization":f"Bearer {client_token}"}, json={"method_type":"mpesa","provider":"safaricom","label":"M-Pesa · 0001","last_four":"0001","is_default":True})
         assert method.status_code == 201
         assert client.get("/v1/payment-methods", headers={"Authorization":f"Bearer {client_token}"}).json()[0]["is_default"] is True

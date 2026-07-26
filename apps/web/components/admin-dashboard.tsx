@@ -805,6 +805,7 @@ function RiskCentre() {
       severity: string;
       score: number;
       status: string;
+      user_id:string|null;
     }[]
   >([]);
   const [documents, setDocuments] = useState<
@@ -836,6 +837,7 @@ function RiskCentre() {
       if (e.ok) setAuditRows(await e.json());
     });
   }, []);
+  const reviewRisk=async(id:string,status:string,suspend_user=false)=>{const response=await fetch(`/api/marketplace/admin/risk-signals/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,suspend_user})});if(response.ok)setRisks(current=>current.map(item=>item.id===id?{...item,status}:item))};
   return (
     <section className="ops-data-page">
       <div className="ops-metrics">
@@ -873,6 +875,7 @@ function RiskCentre() {
                 <span>
                   {item.severity} · score {item.score}
                 </span>
+                {item.status!=="resolved"&&item.status!=="dismissed"&&<div className="risk-actions"><button onClick={()=>void reviewRisk(item.id,"investigating")}>Investigate</button><button onClick={()=>void reviewRisk(item.id,"resolved")}>Resolve</button>{item.user_id&&<button className="danger" onClick={()=>{if(window.confirm("Suspend the connected user while this signal is investigated?"))void reviewRisk(item.id,"investigating",true)}}>Suspend account</button>}</div>}
               </article>
             ))
           ) : (

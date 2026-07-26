@@ -563,6 +563,14 @@ class ReviewCreate(BaseModel):
     comment: str = Field(default="", max_length=2000)
 
 
+class ReviewReplyCreate(BaseModel):
+    body: str = Field(min_length=2, max_length=2000)
+
+
+class JobScheduleUpdate(BaseModel):
+    scheduled_for: datetime
+
+
 class DisputeCreate(BaseModel):
     reason: str = Field(min_length=3, max_length=180)
     details: str = Field(min_length=10, max_length=4000)
@@ -647,6 +655,15 @@ def require_job_access(job: Job, db: Session, user: User) -> None:
     raise HTTPException(403, "You do not have access to this job")
 
 
+def require_job_participant(job: Job, db: Session, user: User) -> None:
+    if user.role in {UserRole.admin, UserRole.support} or job.client_user_id == user.id:
+        return
+    artisan = user_artisan(db, user)
+    if artisan and job.assigned_artisan_id == artisan.id:
+        return
+    raise HTTPException(403, "Only job participants can make this change")
+
+
 def quote_dict(quote: Quote, db: Session) -> dict:
     artisan = db.get(Artisan, quote.artisan_id)
     return {"id":quote.id, "job_id":quote.job_id, "artisan_id":quote.artisan_id, "artisan_name":artisan.name if artisan else "Artisan", "artisan_rating":artisan.rating if artisan else 0, "amount":quote.amount, "message":quote.message, "eta_hours":quote.eta_hours, "status":quote.status.value, "created_at":quote.created_at}
@@ -715,7 +732,7 @@ def job_room(job_id: str, db: Session = Depends(get_db), user: User = Depends(ge
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    require_job_access(job, db, user)
+    require_job_participant(job, db, user)
     messages = db.scalars(select(JobMessage).where(JobMessage.job_id == job.id).order_by(JobMessage.created_at)).all()
     milestones = db.scalars(select(JobMilestone).where(JobMilestone.job_id == job.id).order_by(JobMilestone.created_at)).all()
     quotes = db.scalars(select(Quote).where(Quote.job_id == job.id).order_by(Quote.created_at.desc())).all()
@@ -724,7 +741,7 @@ def job_room(job_id: str, db: Session = Depends(get_db), user: User = Depends(ge
     evidence=db.scalars(select(JobEvidence).where(JobEvidence.job_id==job.id).order_by(JobEvidence.created_at)).all()
     completion=db.scalar(select(CompletionApproval).where(CompletionApproval.job_id==job.id))
     return {
-        "job":{"id":job.id,"reference":job.reference,"title":job.title,"trade":job.trade,"area":job.area,"status":job.status.value,"client_name":job.client_name,"assigned_artisan_id":job.assigned_artisan_id},
+        "job":{"id":job.id,"reference":job.reference,"title":job.title,"trade":job.trade,"area":job.area,"status":job.status.value,"client_name":job.client_name,"assigned_artisan_id":job.assigned_artisan_id,"scheduled_for":job.scheduled_for},
         "quotes":[quote_dict(item, db) for item in quotes],
         "messages":[{"id":item.id,"sender_id":item.sender_id,"body":item.body,"kind":item.kind,"attachment_url":item.attachment_url,"created_at":item.created_at} for item in messages],
         "milestones":[{"id":item.id,"title":item.title,"amount":item.amount,"status":item.status.value,"due_at":item.due_at} for item in milestones],
@@ -944,7 +961,7 @@ def send_message(job_id: str, data: MessageCreate, db: Session = Depends(get_db)
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    require_job_access(job, db, user)
+    require_job_participant(job, db, user)
     message = JobMessage(job_id=job.id, sender_id=user.id, **data.model_dump())
     db.add(message); db.commit(); db.refresh(message)
     return {"id":message.id,"sender_id":message.sender_id,"body":message.body,"kind":message.kind,"attachment_url":message.attachment_url,"created_at":message.created_at}
@@ -1043,6 +1060,64 @@ def create_review(job_id: str, data: ReviewCreate, db: Session = Depends(get_db)
         artisan.completed_jobs = max(artisan.completed_jobs, len(ratings))
     db.commit(); db.refresh(review)
     return {"id":review.id,"rating":review.rating,"comment":review.comment,"verified":True}
+
+
+@app.get("/v1/reviews/me")
+def my_reviews(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    artisan = user_artisan(db, user) if user.role == UserRole.artisan else None
+    query = select(Review, Job).join(Job, Review.job_id == Job.id)
+    query = query.where(Review.artisan_id == artisan.id) if artisan else query.where(Review.client_user_id == user.id)
+    rows = db.execute(query.order_by(Review.created_at.desc())).all()
+    items = []
+    counts = {rating: 0 for rating in range(1, 6)}
+    for review, job in rows:
+        counts[review.rating] += 1
+        reply = db.scalar(select(JobMessage).where(JobMessage.job_id == job.id, JobMessage.kind == "review_reply").order_by(JobMessage.created_at.desc()))
+        items.append({"id": review.id, "job_id": job.id, "reference": job.reference, "trade": job.trade, "rating": review.rating, "comment": review.comment, "created_at": review.created_at, "reply": reply.body if reply else ""})
+    total = len(items)
+    average = round(sum(item["rating"] for item in items) / total, 2) if total else 0
+    return {"average": average, "total": total, "breakdown": counts, "items": items}
+
+
+@app.post("/v1/reviews/{review_id}/reply", status_code=201)
+def reply_to_review(review_id: str, data: ReviewReplyCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.artisan))) -> dict:
+    artisan = user_artisan(db, user)
+    review = db.get(Review, review_id)
+    if not artisan or not review or review.artisan_id != artisan.id:
+        raise HTTPException(404, "Review not found")
+    if db.scalar(select(JobMessage).where(JobMessage.job_id == review.job_id, JobMessage.kind == "review_reply")):
+        raise HTTPException(409, "This review already has a reply")
+    item = JobMessage(job_id=review.job_id, sender_id=user.id, body=data.body, kind="review_reply")
+    db.add(item); audit(db, user.id, "review.replied", "review", review.id); db.commit(); db.refresh(item)
+    return {"id": item.id, "body": item.body}
+
+
+@app.patch("/v1/jobs/{job_id}/schedule")
+def reschedule_job(job_id: str, data: JobScheduleUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    require_job_participant(job, db, user)
+    if job.status in {JobStatus.completed, JobStatus.cancelled}:
+        raise HTTPException(409, "This job can no longer be rescheduled")
+    job.scheduled_for = data.scheduled_for
+    db.add(JobEvent(job_id=job.id, event_type="job.rescheduled", actor_id=user.id, payload={"scheduled_for": data.scheduled_for.isoformat()}))
+    db.commit()
+    return {"id": job.id, "scheduled_for": job.scheduled_for}
+
+
+@app.post("/v1/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    require_job_participant(job, db, user)
+    if job.status in {JobStatus.completed, JobStatus.cancelled}:
+        raise HTTPException(409, "This job cannot be cancelled")
+    job.status = JobStatus.cancelled
+    db.add(JobEvent(job_id=job.id, event_type="job.cancelled", actor_id=user.id, payload={}))
+    db.commit()
+    return {"id": job.id, "status": job.status.value}
 
 
 @app.post("/v1/jobs/{job_id}/disputes", status_code=201)
@@ -1677,6 +1752,26 @@ async def dispatch_notification(data: DispatchCreate, db: Session = Depends(get_
 def list_risk_signals(db: Session = Depends(get_db), _: User = Depends(require_roles(UserRole.admin,UserRole.support))) -> list[dict]:
     rows=db.scalars(select(RiskSignal).order_by(RiskSignal.created_at.desc()).limit(100)).all()
     return [{"id":row.id,"user_id":row.user_id,"job_id":row.job_id,"signal_type":row.signal_type,"severity":row.severity,"score":row.score,"details":row.details,"status":row.status,"created_at":row.created_at} for row in rows]
+
+
+class RiskAction(BaseModel):
+    status: str = Field(pattern="^(open|investigating|resolved|dismissed)$")
+    suspend_user: bool = False
+
+
+@app.patch("/v1/admin/risk-signals/{signal_id}")
+def act_on_risk_signal(signal_id: str, data: RiskAction, db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.admin))) -> dict:
+    signal = db.get(RiskSignal, signal_id)
+    if not signal:
+        raise HTTPException(404, "Risk signal not found")
+    signal.status = data.status
+    if data.suspend_user and signal.user_id:
+        target = db.get(User, signal.user_id)
+        if target and target.role not in {UserRole.admin, UserRole.support}:
+            target.active = False
+    audit(db, user.id, "risk.reviewed", "risk_signal", signal.id, {"status": data.status, "suspend_user": data.suspend_user})
+    db.commit()
+    return {"id": signal.id, "status": signal.status}
 
 
 @app.get("/v1/admin/sos-alerts")

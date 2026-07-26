@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Bell,
   BriefcaseBusiness,
+  CalendarDays,
   Check,
   CircleDollarSign,
   Clock3,
@@ -115,6 +116,7 @@ export function DashboardClient({
     ["notifications", "Notifications", Bell],
     ["earnings", artisanMode ? "Earnings" : "Payments", CircleDollarSign],
     ["care", artisanMode ? "Support" : "Property care", MapPin],
+    ["schedule", artisanMode ? "Availability" : "", CalendarDays],
     ["favorites", artisanMode ? "" : "Saved artisans", Heart],
     ["reviews", "Reviews", Star],
     ["safety", "Safety & privacy", ShieldCheck],
@@ -241,6 +243,7 @@ export function DashboardClient({
                 </div>
               </div>
             )}
+            <OnboardingChecklist artisanMode={artisanMode} jobs={jobs} metrics={metrics} onNavigate={setSection}/>
             <PersonalizedInsights jobs={jobs} metrics={metrics} artisanMode={artisanMode} name={user?.name||""}/>
             <RoleChart metrics={metrics} />
             <GrowthTools />
@@ -348,12 +351,7 @@ export function DashboardClient({
             )}
           </section>
         )}
-        {section === "reviews" && (
-          <EmptyPanel
-            title="No reviews yet"
-            text="Only reviews connected to completed jobs are published."
-          />
-        )}
+        {section === "reviews" && <ReviewsPanel artisanMode={artisanMode}/>}
         {section === "safety" && <SafetyAndPrivacy />}
         {section === "security" && <SecurityCenter />}
         {section === "care" && <CareAndSupport artisanMode={artisanMode}/>}
@@ -542,12 +540,28 @@ function SafetyAndPrivacy() {
 function CareAndSupport({artisanMode}:{artisanMode:boolean}){
   type PropertyItem={id:string;name:string;area:string;property_type:string};
   type Ticket={id:string;reference:string;subject:string;priority:string;status:string;sla_due_at:string};
-  const[properties,setProperties]=useState<PropertyItem[]>([]);const[tickets,setTickets]=useState<Ticket[]>([]);const[earnings,setEarnings]=useState<{total:number;pending:number}|null>(null);const[notice,setNotice]=useState("");
-  const load=()=>void Promise.all([artisanMode?Promise.resolve(null):fetch("/api/marketplace/properties"),fetch("/api/marketplace/support-tickets"),artisanMode?fetch("/api/marketplace/artisan/earnings"):Promise.resolve(null)]).then(async([a,b,c])=>{if(a&&a.ok)setProperties(await a.json());if(b.ok)setTickets(await b.json());if(c&&c.ok)setEarnings(await c.json())});
+  type Schedule={id:string;property_id:string;title:string;trade:string;frequency_days:number;next_due_at:string};
+  const[properties,setProperties]=useState<PropertyItem[]>([]);const[tickets,setTickets]=useState<Ticket[]>([]);const[schedules,setSchedules]=useState<Schedule[]>([]);const[earnings,setEarnings]=useState<{total:number;pending:number}|null>(null);const[notice,setNotice]=useState("");
+  const load=()=>void Promise.all([artisanMode?Promise.resolve(null):fetch("/api/marketplace/properties"),fetch("/api/marketplace/support-tickets"),artisanMode?fetch("/api/marketplace/artisan/earnings"):Promise.resolve(null),artisanMode?Promise.resolve(null):fetch("/api/marketplace/maintenance-schedules")]).then(async([a,b,c,d])=>{if(a&&a.ok)setProperties(await a.json());if(b.ok)setTickets(await b.json());if(c&&c.ok)setEarnings(await c.json());if(d&&d.ok)setSchedules(await d.json())});
   useEffect(load,[artisanMode]);
   const addProperty=async()=>{const name=window.prompt("Property name");const area=window.prompt("Nairobi estate","Kilimani");if(!name||!area)return;const response=await fetch("/api/marketplace/properties",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,area,property_type:"home",address:"",notes:""})});setNotice(response.ok?"Property added.":(await response.json()).detail);load()};
+  const addSchedule=async(property:PropertyItem)=>{const title=window.prompt(`Maintenance reminder for ${property.name}`,"Routine inspection");const trade=window.prompt("Service trade","General maintenance");const frequency=Number(window.prompt("Repeat every how many days?","90"));if(!title||!trade||!frequency)return;const next=new Date();next.setDate(next.getDate()+frequency);const response=await fetch("/api/marketplace/maintenance-schedules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({property_id:property.id,title,trade,frequency_days:frequency,next_due_at:next.toISOString()})});setNotice(response.ok?"Recurring maintenance added.":(await response.json()).detail||"Schedule could not be added.");load()};
   const ticket=async()=>{const subject=window.prompt("What do you need help with?");const details=window.prompt("Describe the issue");if(!subject||!details)return;const response=await fetch("/api/marketplace/support-tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subject,details,priority:"normal"})});setNotice(response.ok?"Support ticket opened.":(await response.json()).detail);load()};
-  return <section className="dash-panel-page"><span className="kicker">{artisanMode?"Earnings assistance":"Homes & support"}</span><h2>{artisanMode?"Support and bonus ledger":"Property care made simple"}</h2>{notice&&<p className="form-success">{notice}</p>}{artisanMode&&<div className="dashboard-finance-grid"><article><span>Paid tips & bonuses</span><strong>KSh {(earnings?.total||0).toLocaleString()}</strong></article><article><span>Pending</span><strong>KSh {(earnings?.pending||0).toLocaleString()}</strong></article></div>}{!artisanMode&&<><button className="button button-dark" onClick={()=>void addProperty()}>Add a property</button><div className="growth-grid">{properties.map(item=><article key={item.id}><small>{item.property_type}</small><strong>{item.name}</strong><p>{item.area}</p></article>)}</div></>}<div className="section-heading"><div><span className="kicker">Service desk</span><h2>Your support tickets</h2></div><button onClick={()=>void ticket()}>Open ticket</button></div>{tickets.length?tickets.map(item=><article className="dashboard-room-link" key={item.id}><span><strong>{item.subject}</strong><small>{item.reference} · {item.priority} · SLA {new Date(item.sla_due_at).toLocaleString()}</small></span><b>{item.status}</b></article>):<EmptyPanel title="No support tickets" text="Help requests and their SLA status appear here."/>}</section>
+  return <section className="dash-panel-page"><span className="kicker">{artisanMode?"Earnings assistance":"Homes & support"}</span><h2>{artisanMode?"Support and bonus ledger":"Property care made simple"}</h2>{notice&&<p className="form-success">{notice}</p>}{artisanMode&&<div className="dashboard-finance-grid"><article><span>Paid tips & bonuses</span><strong>KSh {(earnings?.total||0).toLocaleString()}</strong></article><article><span>Pending</span><strong>KSh {(earnings?.pending||0).toLocaleString()}</strong></article></div>}{!artisanMode&&<><button className="button button-dark" onClick={()=>void addProperty()}>Add a property</button><div className="growth-grid">{properties.map(item=><article key={item.id}><small>{item.property_type}</small><strong>{item.name}</strong><p>{item.area}</p><button onClick={()=>void addSchedule(item)}>Schedule maintenance</button></article>)}</div><div className="section-heading"><div><span className="kicker">Recurring care</span><h2>Maintenance calendar</h2></div></div>{schedules.length?schedules.map(item=><article className="dashboard-room-link" key={item.id}><span><strong>{item.title}</strong><small>{item.trade} · every {item.frequency_days} days</small></span><b>{new Date(item.next_due_at).toLocaleDateString()}</b></article>):<EmptyPanel title="No recurring maintenance" text="Add a property, then schedule work before problems become urgent."/>}</>}<div className="section-heading"><div><span className="kicker">Service desk</span><h2>Your support tickets</h2></div><button onClick={()=>void ticket()}>Open ticket</button></div>{tickets.length?tickets.map(item=><article className="dashboard-room-link" key={item.id}><span><strong>{item.subject}</strong><small>{item.reference} · {item.priority} · SLA {new Date(item.sla_due_at).toLocaleString()}</small></span><b>{item.status}</b></article>):<EmptyPanel title="No support tickets" text="Help requests and their SLA status appear here."/>}</section>
+}
+
+function ReviewsPanel({artisanMode}:{artisanMode:boolean}) {
+  type ReviewItem={id:string;job_id:string;reference:string;trade:string;rating:number;comment:string;created_at:string;reply:string};
+  type ReviewData={average:number;total:number;breakdown:Record<string,number>;items:ReviewItem[]};
+  const[data,setData]=useState<ReviewData|null>(null);const[reply,setReply]=useState<Record<string,string>>({});const[notice,setNotice]=useState("");
+  const load=()=>void fetch("/api/marketplace/reviews/me").then(async response=>{if(response.ok)setData(await response.json())});
+  useEffect(load,[]);
+  const publish=async(item:ReviewItem)=>{const body=(reply[item.id]||"").trim();if(!body)return;const response=await fetch(`/api/marketplace/reviews/${item.id}/reply`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({body})});setNotice(response.ok?"Your public reply is live.":(await response.json()).detail||"Reply could not be published.");if(response.ok){setReply({...reply,[item.id]:""});load()}};
+  if(!data)return <div className="page-loading"><span/><strong>Loading verified reviews</strong></div>;
+  return <section className="dash-panel-page review-centre"><span className="kicker">Verified job feedback</span><h2>{artisanMode?"Your reputation":"Reviews you have published"}</h2>{notice&&<p className="form-success">{notice}</p>}
+    <div className="review-summary"><article><strong>{data.average||"New"}</strong><div className="review-stars" aria-label={data.total?`${data.average} out of 5 stars`:"No rating yet"}>{[1,2,3,4,5].map(star=><Star key={star} fill={star<=Math.round(data.average)?"currentColor":"none"}/>)}</div><small>{data.total} verified review{data.total===1?"":"s"}</small></article><div>{[5,4,3,2,1].map(star=><span key={star}><b>{star}<Star fill="currentColor"/></b><i><em style={{width:`${data.total?((data.breakdown[String(star)]||0)/data.total)*100:0}%`}}/></i><small>{data.breakdown[String(star)]||0}</small></span>)}</div></div>
+    {data.items.length?data.items.map(item=><article className="review-card" key={item.id}><header><span><strong>{item.trade}</strong><small>{item.reference} · {new Date(item.created_at).toLocaleDateString()}</small></span><div className="review-stars">{[1,2,3,4,5].map(star=><Star key={star} fill={star<=item.rating?"currentColor":"none"}/>)}</div></header><p>{item.comment||"Rating submitted without a written comment."}</p>{item.reply?<blockquote><strong>Artisan response</strong>{item.reply}</blockquote>:artisanMode&&<div className="review-reply"><input value={reply[item.id]||""} onChange={event=>setReply({...reply,[item.id]:event.target.value})} placeholder="Thank the client or add context"/><button onClick={()=>void publish(item)}>Reply</button></div>}<Link href={`/jobs/${item.job_id}`}>Open completed job</Link></article>):<EmptyPanel title="No reviews yet" text="Only feedback connected to completed jobs appears here."/>}
+  </section>
 }
 
 function SchedulePanel() {
@@ -660,6 +674,23 @@ function PersonalizedInsights({jobs,metrics,artisanMode,name}:{jobs:Job[];metric
       <article className="completion-card"><div className="completion-ring" style={{"--completion":`${completion*3.6}deg`} as CSSProperties}><span>{completion}%</span></div><div><span>{artisanMode?"Completion strength":"Jobs completed"}</span><strong>{completed} of {jobs.length}</strong><small>{jobs.length?completion>=80?"Strong follow-through across your jobs.":"Keep active work moving through the protected job room.":"Your progress chart begins with your first booking."}</small></div></article>
     </div>
   </section>
+}
+
+function OnboardingChecklist({artisanMode,jobs,metrics,onNavigate}:{artisanMode:boolean;jobs:Job[];metrics:DashboardMetrics;onNavigate:(section:string)=>void}){
+  const steps=artisanMode?[
+    {label:"Complete your public profile",done:true,section:"profile"},
+    {label:"Set weekly availability",done:false,section:"schedule"},
+    {label:"Respond to your first job",done:jobs.length>0,section:"jobs"},
+    {label:"Complete a protected payment",done:metrics.transactions>0,section:"earnings"},
+  ]:[
+    {label:"Save your first property",done:false,section:"care"},
+    {label:"Post or schedule a job",done:jobs.length>0,section:"jobs"},
+    {label:"Save a trusted artisan",done:false,section:"favorites"},
+    {label:"Complete a protected payment",done:metrics.transactions>0,section:"earnings"},
+  ];
+  const complete=steps.filter(step=>step.done).length;
+  if(complete===steps.length)return null;
+  return <section className="onboarding-card"><div><span className="kicker">{artisanMode?"Build your business":"Set up your home-care workspace"}</span><h2>{complete} of {steps.length} essentials complete</h2><p>Finish these once and the dashboard becomes faster for every future job.</p></div><div>{steps.map(step=><button className={step.done?"done":""} key={step.label} onClick={()=>onNavigate(step.section)}><span>{step.done?<Check/>:complete+1}</span><strong>{step.label}</strong></button>)}</div></section>
 }
 
 function RoleChart({ metrics }: { metrics: DashboardMetrics }) {
