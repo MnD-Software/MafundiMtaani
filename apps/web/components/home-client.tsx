@@ -135,6 +135,10 @@ export function HomeClient() {
             </div>
           </div>
           <div className="hero-visual hero-marketplace">
+            <div className="hero-illustration">
+              <img src="/images/mafundi-hero-services.png" alt="Illustrated electrical, plumbing, carpentry and Nairobi service coverage" />
+              <div className="hero-illustration-status"><MapPin size={15}/><span><small>Serving your area</small><strong>{area}, Nairobi</strong></span></div>
+            </div>
             <div className="hero-market-card">
               <div className="hero-market-head"><span><MapPin size={15}/> {area}, Nairobi</span><small>Live marketplace</small></div>
               <div className="hero-market-title"><span className="hero-tool"><Wrench/></span><div><small>What needs attention?</small><strong>{active === "All" ? "Find the right professional" : active}</strong></div></div>
